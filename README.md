@@ -5,7 +5,7 @@ RpcClient for Go RPC servers.
 
 ## Installation ##
 
-`go get github.com/cgrates/fsock`
+`go get github.com/cgrates/rpcclient`
 
 ## Support ##
 Join [CGRateS](http://www.cgrates.org/ "CGRateS Website") on Google Groups [here](https://groups.google.com/forum/#!forum/cgrates "CGRateS on GoogleGroups").
