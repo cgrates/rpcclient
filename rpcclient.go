@@ -1,5 +1,5 @@
 /*
-Real-time Charging System for Telecom & ISP environments
+RpcClient for Go RPC Servers
 Copyright (C) 2012-2014 ITsysCOM GmbH
 
 This program is free software: you can redistribute it and/or modify
