@@ -62,11 +62,6 @@ func (self *RpcClient) Connect() (err error) {
 	return nil
 }
 
-// Normal Call without reconnect
-func (self *RpcClient) classicCall(serviceMethod string, args interface{}, reply interface{}) error {
-	return self.connection.Call(serviceMethod, args, reply)
-}
-
 func (self *RpcClient) Reconnect() (err error) {
 	for i := 0; i < self.reconnects; i++ {
 		if self.connection, err = jsonrpc.Dial(self.transport, self.address); err == nil { // No error on connect, success
@@ -78,12 +73,12 @@ func (self *RpcClient) Reconnect() (err error) {
 }
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	err := self.classicCall(serviceMethod, args, reply)
+	err := self.connection.Call(serviceMethod, args, reply)
 	if err != nil && err == rpc.ErrShutdown && self.reconnects != 0 {
 		if errReconnect := self.Reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
-			return self.classicCall(serviceMethod, args, reply)
+			return self.connection.Call(serviceMethod, args, reply)
 		}
 	}
 	return err // Original reply otherwise

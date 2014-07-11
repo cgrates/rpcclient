@@ -50,8 +50,8 @@ type CacheStats struct {
 	DerivedChargers int64
 }
 
-var eCacheStats CacheStats = CacheStats{Destinations:3, RatingPlans:3, RatingProfiles:3, 
-	Actions:5, SharedGroups:1, RatingAliases:1, AccountAliases:1, DerivedChargers:1 }
+var eCacheStats CacheStats = CacheStats{Destinations:4, RatingPlans:3, RatingProfiles:3,
+	Actions:8, SharedGroups:1, RatingAliases:0, AccountAliases:0, DerivedChargers:3}
 
 func startEngine() error {
 	enginePath, err := exec.LookPath("cgr-engine")
