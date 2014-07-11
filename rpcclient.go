@@ -46,7 +46,7 @@ type RpcClient struct {
 	transport  string
 	address    string
 	reconnects int
-	codec      string // JSON_RPCrpc or GOB_RPC
+	codec      string // JSON_RPC or GOB_RPC
 	connection *rpc.Client
 }
 
@@ -56,15 +56,12 @@ func (self *RpcClient) connect() (err error) {
 	} else {
 		self.connection, err = rpc.Dial(self.transport, self.address)
 	}
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func (self *RpcClient) reconnect() (err error) {
 	for i := 0; i < self.reconnects; i++ {
-		if self.connection, err = jsonrpc.Dial(self.transport, self.address); err == nil { // No error on connect, success
+		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
 		}
 		time.Sleep(time.Duration(i/2) * time.Second) // Cound not reconnect, retry
@@ -81,5 +78,5 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 			return self.connection.Call(serviceMethod, args, reply)
 		}
 	}
-	return err // Original reply otherwise
+	return err
 }
