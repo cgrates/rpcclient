@@ -36,7 +36,7 @@ func NewRpcClient(transport, addr string, port, reconnects int, codec string) (*
 	} else {
 		rpcClient = &RpcClient{transport: transport, address: fmt.Sprintf("%s:%d", addr, port), reconnects: reconnects, codec: codec}
 	}
-	if err := rpcClient.Connect(); err != nil { // No point in configuring if not possible to establish a connection
+	if err := rpcClient.connect(); err != nil { // No point in configuring if not possible to establish a connection
 		return nil, err
 	}
 	return rpcClient, nil
@@ -50,7 +50,7 @@ type RpcClient struct {
 	connection *rpc.Client
 }
 
-func (self *RpcClient) Connect() (err error) {
+func (self *RpcClient) connect() (err error) {
 	if self.codec == JSON_RPC {
 		self.connection, err = jsonrpc.Dial(self.transport, self.address)
 	} else {
@@ -62,7 +62,7 @@ func (self *RpcClient) Connect() (err error) {
 	return nil
 }
 
-func (self *RpcClient) Reconnect() (err error) {
+func (self *RpcClient) reconnect() (err error) {
 	for i := 0; i < self.reconnects; i++ {
 		if self.connection, err = jsonrpc.Dial(self.transport, self.address); err == nil { // No error on connect, success
 			return nil
@@ -75,7 +75,7 @@ func (self *RpcClient) Reconnect() (err error) {
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	err := self.connection.Call(serviceMethod, args, reply)
 	if err != nil && err == rpc.ErrShutdown && self.reconnects != 0 {
-		if errReconnect := self.Reconnect(); errReconnect != nil {
+		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
 			return self.connection.Call(serviceMethod, args, reply)
