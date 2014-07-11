@@ -63,7 +63,7 @@ func (self *RpcClient) Connect() (err error) {
 }
 
 // Normal Call without reconnect
-func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (self *RpcClient) classicCall(serviceMethod string, args interface{}, reply interface{}) error {
 	return self.connection.Call(serviceMethod, args, reply)
 }
 
@@ -77,13 +77,13 @@ func (self *RpcClient) Reconnect() (err error) {
 	return errors.New("RECONNECT_FAIL")
 }
 
-func (self *RpcClient) CallWithReconnect(serviceMethod string, args interface{}, reply interface{}) error {
-	err := self.Call(serviceMethod, args, reply)
-	if err != nil && err == rpc.ErrShutdown {
+func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	err := self.classicCall(serviceMethod, args, reply)
+	if err != nil && err == rpc.ErrShutdown && self.reconnects != 0 {
 		if errReconnect := self.Reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
-			return self.Call(serviceMethod, args, reply)
+			return self.classicCall(serviceMethod, args, reply)
 		}
 	}
 	return err // Original reply otherwise

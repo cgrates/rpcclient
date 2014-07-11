@@ -50,6 +50,9 @@ type CacheStats struct {
 	DerivedChargers int64
 }
 
+var eCacheStats CacheStats = CacheStats{Destinations:3, RatingPlans:3, RatingProfiles:3, 
+	Actions:5, SharedGroups:1, RatingAliases:1, AccountAliases:1, DerivedChargers:1 }
+
 func startEngine() error {
 	enginePath, err := exec.LookPath("cgr-engine")
 	if err != nil {
@@ -73,9 +76,7 @@ func TestNewRpcClient(t *testing.T) {
 		t.Fatal("Cannot start cgr-engine: ", err.Error())
 	}
 	var cacheStats CacheStats
-	eCacheStats := CacheStats{Destinations: 4, RatingPlans: 3, RatingProfiles: 3, Actions: 8,
-		SharedGroups: 1, RatingAliases: 0, AccountAliases: 0, DerivedChargers: 3}
-	if rpcClient, err = NewRpcClient("tcp", "localhost", 2013, 2, GOB_RPC); err != nil {
+	if rpcClient, err = NewRpcClient("tcp", "localhost", 2013, 0, GOB_RPC); err != nil {
 		t.Error("Unexpected error: ", err)
 	} else if rpcClient.connection == nil {
 		t.Error("Not connected")
@@ -85,7 +86,7 @@ func TestNewRpcClient(t *testing.T) {
 	} else if !reflect.DeepEqual(eCacheStats, cacheStats) {
 		t.Errorf("Expecting: %+v, received: %+v", eCacheStats, cacheStats)
 	}
-	if rpcClient, err = NewRpcClient("tcp", "localhost", 2012, 2, JSON_RPC); err != nil {
+	if rpcClient, err = NewRpcClient("tcp", "localhost", 2012, 0, JSON_RPC); err != nil {
 		t.Error("Unexpected error: ", err)
 	} else if rpcClient.connection == nil {
 		t.Error("Not connected")
@@ -97,7 +98,7 @@ func TestNewRpcClient(t *testing.T) {
 	}
 }
 
-func TestCallWithReconnect(t *testing.T) {
+func TestCallWithConnectionLoss(t *testing.T) {
 	if !*testLocal {
 		return
 	}
@@ -105,14 +106,24 @@ func TestCallWithReconnect(t *testing.T) {
 		t.Fatal("Cannot start cgr-engine: ", err.Error())
 	}
 	var cacheStats CacheStats
-	eCacheStats := CacheStats{Destinations: 4, RatingPlans: 3, RatingProfiles: 3, Actions: 8,
-		SharedGroups: 1, RatingAliases: 0, AccountAliases: 0, DerivedChargers: 3}
 	if err := rpcClient.Call("ApierV1.GetCacheStats", AttrCacheStats{}, &cacheStats); err == nil {
 		t.Error("Previous connection should be lost due to restart")
 	}
-	if err := rpcClient.CallWithReconnect("ApierV1.GetCacheStats", AttrCacheStats{}, &cacheStats); err != nil {
-		t.Error(err.Error())
-	} else if !reflect.DeepEqual(eCacheStats, cacheStats) {
-		t.Errorf("Expecting: %+v, received: %+v", eCacheStats, cacheStats)
-	}
+}
+
+func TestReconnect(t *testing.T) {
+        if !*testLocal {
+                return
+        }
+        var cacheStats CacheStats
+        if rpcClient, err = NewRpcClient("tcp", "localhost", 2013, 1, GOB_RPC); err != nil {
+                t.Error("Unexpected error: ", err)
+        } else if rpcClient.connection == nil {
+                t.Error("Not connected")
+        }
+        if err := rpcClient.Call("ApierV1.GetCacheStats", AttrCacheStats{}, &cacheStats); err != nil {
+                t.Error(err.Error())
+        } else if !reflect.DeepEqual(eCacheStats, cacheStats) {
+                t.Errorf("Expecting: %+v, received: %+v", eCacheStats, cacheStats)
+        }
 }
