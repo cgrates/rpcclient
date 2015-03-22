@@ -19,23 +19,23 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package rpcclient
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
+	"io/ioutil"
+	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"strings"
 	"time"
 )
 
 var JSON_RPC = "json"
+var JSON_HTTP = "http_jsonrpc"
 var GOB_RPC = "gob"
+var ReqUnsynchronized = errors.New("REQ_UNSYNCHRONIZED")
 
 func NewRpcClient(transport, addr string, port, reconnects int, codec string) (*RpcClient, error) {
-	var rpcClient *RpcClient
-	if port == 0 { // Default port used
-		rpcClient = &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec}
-	} else {
-		rpcClient = &RpcClient{transport: transport, address: fmt.Sprintf("%s:%d", addr, port), reconnects: reconnects, codec: codec}
-	}
+	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec}
 	if err := rpcClient.connect(); err != nil { // No point in configuring if not possible to establish a connection
 		return nil, err
 	}
@@ -47,19 +47,25 @@ type RpcClient struct {
 	address    string
 	reconnects int
 	codec      string // JSON_RPC or GOB_RPC
-	connection *rpc.Client
+	connection RpcClientConnection
 }
 
 func (self *RpcClient) connect() (err error) {
-	if self.codec == JSON_RPC {
+	switch self.codec {
+	case JSON_RPC:
 		self.connection, err = jsonrpc.Dial(self.transport, self.address)
-	} else {
+	case JSON_HTTP:
+		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
+	default:
 		self.connection, err = rpc.Dial(self.transport, self.address)
 	}
-	return err
+	return nil
 }
 
 func (self *RpcClient) reconnect() (err error) {
+	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
+		return self.connect()
+	}
 	for i := 0; i < self.reconnects; i++ {
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
@@ -71,7 +77,7 @@ func (self *RpcClient) reconnect() (err error) {
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	err := self.connection.Call(serviceMethod, args, reply)
-	if err != nil && err == rpc.ErrShutdown && self.reconnects != 0 {
+	if err != nil && (err == rpc.ErrShutdown || err == ReqUnsynchronized) && self.reconnects != 0 {
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
@@ -79,4 +85,55 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		}
 	}
 	return err
+}
+
+// Connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
+type RpcClientConnection interface {
+	Call(string, interface{}, interface{}) error
+}
+
+// Response received for
+type JsonRpcResponse struct {
+	Id     uint64
+	Result *json.RawMessage
+	Error  error
+}
+
+type HttpJsonRpcClient struct {
+	httpClient *http.Client
+	id         uint64
+	url        string
+}
+
+func (self *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	self.id += 1
+	id := self.id
+	data, err := json.Marshal(map[string]interface{}{
+		"method": serviceMethod,
+		"id":     self.id,
+		"params": [1]interface{}{args},
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := self.httpClient.Post(self.url, "application/json", ioutil.NopCloser(strings.NewReader(string(data)))) // Closer so we automatically have close after response
+	if err != nil {
+		return err
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var jsonRsp JsonRpcResponse
+	err = json.Unmarshal(body, &jsonRsp)
+	if err != nil {
+		return err
+	}
+	if jsonRsp.Id != id {
+		return ReqUnsynchronized
+	}
+	if jsonRsp.Error != nil {
+		return jsonRsp.Error
+	}
+	return json.Unmarshal(*jsonRsp.Result, reply)
 }
