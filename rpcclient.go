@@ -34,7 +34,7 @@ var JSON_HTTP = "http_jsonrpc"
 var GOB_RPC = "gob"
 var ReqUnsynchronized = errors.New("REQ_UNSYNCHRONIZED")
 
-func NewRpcClient(transport, addr string, port, reconnects int, codec string) (*RpcClient, error) {
+func NewRpcClient(transport, addr string, reconnects int, codec string) (*RpcClient, error) {
 	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec}
 	if err := rpcClient.connect(); err != nil { // No point in configuring if not possible to establish a connection
 		return nil, err
