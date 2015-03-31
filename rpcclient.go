@@ -21,6 +21,7 @@ package rpcclient
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/rpc"
@@ -66,7 +67,11 @@ func (self *RpcClient) reconnect() (err error) {
 	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
 		return self.connect()
 	}
-	for i := 0; i < self.reconnects; i++ {
+	i := 0
+	for {
+		if i != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
+			break
+		}
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
 		}
@@ -96,7 +101,7 @@ type RpcClientConnection interface {
 type JsonRpcResponse struct {
 	Id     uint64
 	Result *json.RawMessage
-	Error  error
+	Error  interface{}
 }
 
 type HttpJsonRpcClient struct {
@@ -132,8 +137,15 @@ func (self *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, repl
 	if jsonRsp.Id != id {
 		return ReqUnsynchronized
 	}
-	if jsonRsp.Error != nil {
-		return jsonRsp.Error
+	if jsonRsp.Error != nil || jsonRsp.Result == nil {
+		x, ok := jsonRsp.Error.(string)
+		if !ok {
+			return fmt.Errorf("invalid error %v", jsonRsp.Error)
+		}
+		if x == "" {
+			x = "unspecified error"
+		}
+		return errors.New(x)
 	}
 	return json.Unmarshal(*jsonRsp.Result, reply)
 }
