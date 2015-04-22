@@ -60,10 +60,7 @@ func (self *RpcClient) connect() (err error) {
 	default:
 		self.connection, err = rpc.Dial(self.transport, self.address)
 	}
-	if err != nil {
-		return err
-	}
-	return nil
+	return
 }
 
 func (self *RpcClient) reconnect() (err error) {
