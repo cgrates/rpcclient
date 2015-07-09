@@ -28,8 +28,6 @@ import (
 	"net/rpc/jsonrpc"
 	"strings"
 	"time"
-
-	"github.com/cgrates/cgrates/utils"
 )
 
 var JSON_RPC = "json"
@@ -37,9 +35,27 @@ var JSON_HTTP = "http_jsonrpc"
 var GOB_RPC = "gob"
 var ReqUnsynchronized = errors.New("REQ_UNSYNCHRONIZED")
 
-func NewRpcClient(transport, addr string, reconnects int, codec string) (*RpcClient, error) {
+// successive Fibonacci numbers.
+func Fib() func() time.Duration {
+	a, b := 0, 1
+	return func() time.Duration {
+		a, b = b, a+b
+		return time.Duration(a) * time.Second
+	}
+}
+
+func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec string) (*RpcClient, error) {
+	var err error
 	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec}
-	if err := rpcClient.connect(); err != nil { // No point in configuring if not possible to establish a connection
+	delay := Fib()
+	for i := 0; i < connectAttempts; i++ {
+		err = rpcClient.connect()
+		if err == nil { //Connected so no need to reiterate
+			break
+		}
+		time.Sleep(delay())
+	}
+	if err != nil {
 		return nil, err
 	}
 	return rpcClient, nil
@@ -70,7 +86,7 @@ func (self *RpcClient) reconnect() (err error) {
 		return self.connect()
 	}
 	i := 0
-	delay := utils.Fib()
+	delay := Fib()
 	for {
 		if i != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
 			break
