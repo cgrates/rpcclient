@@ -28,6 +28,8 @@ import (
 	"net/rpc/jsonrpc"
 	"strings"
 	"time"
+
+	"github.com/cgrates/cgrates/utils"
 )
 
 var JSON_RPC = "json"
@@ -68,6 +70,7 @@ func (self *RpcClient) reconnect() (err error) {
 		return self.connect()
 	}
 	i := 0
+	delay := utils.Fib()
 	for {
 		if i != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
 			break
@@ -75,7 +78,7 @@ func (self *RpcClient) reconnect() (err error) {
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
 		}
-		time.Sleep(time.Duration(i/2) * time.Second) // Cound not reconnect, retry
+		time.Sleep(delay()) // Cound not reconnect, retry
 	}
 	return errors.New("RECONNECT_FAIL")
 }
