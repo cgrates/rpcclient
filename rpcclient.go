@@ -27,13 +27,23 @@ import (
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"strings"
+	"sync"
 	"time"
 )
 
-var JSON_RPC = "json"
-var JSON_HTTP = "http_jsonrpc"
-var GOB_RPC = "gob"
-var ReqUnsynchronized = errors.New("REQ_UNSYNCHRONIZED")
+const (
+	JSON_RPC     = "json"
+	JSON_HTTP    = "http_jsonrpc"
+	GOB_RPC      = "gob"
+	INTERNAL_RPC = "internal"
+)
+
+var (
+	ErrReqUnsynchronized       = errors.New("REQ_UNSYNCHRONIZED")
+	ErrUnsupporteServiceMethod = errors.New("UNSUPPORTED_SERVICE_METHOD")
+	ErrWrongArgsType           = errors.New("WRONG_ARGS_TYPE")
+	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
+)
 
 // successive Fibonacci numbers.
 func Fib() func() time.Duration {
@@ -44,9 +54,9 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec string) (*RpcClient, error) {
+func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
 	var err error
-	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec}
+	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
 		err = rpcClient.connect()
@@ -67,14 +77,19 @@ type RpcClient struct {
 	reconnects int
 	codec      string // JSON_RPC or GOB_RPC
 	connection RpcClientConnection
+	connMux    *sync.Mutex
 }
 
 func (self *RpcClient) connect() (err error) {
+	self.connMux.Lock()
+	defer self.connMux.Unlock()
 	switch self.codec {
 	case JSON_RPC:
 		self.connection, err = jsonrpc.Dial(self.transport, self.address)
 	case JSON_HTTP:
 		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
+	case INTERNAL_RPC:
+		return nil // connection should be set on init
 	default:
 		self.connection, err = rpc.Dial(self.transport, self.address)
 	}
@@ -101,7 +116,7 @@ func (self *RpcClient) reconnect() (err error) {
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	err := self.connection.Call(serviceMethod, args, reply)
-	if err != nil && (err == rpc.ErrShutdown || err == ReqUnsynchronized) && self.reconnects != 0 {
+	if err != nil && (err == rpc.ErrShutdown || err == ErrReqUnsynchronized) && self.reconnects != 0 {
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
@@ -154,7 +169,7 @@ func (self *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, repl
 		return err
 	}
 	if jsonRsp.Id != id {
-		return ReqUnsynchronized
+		return ErrReqUnsynchronized
 	}
 	if jsonRsp.Error != nil || jsonRsp.Result == nil {
 		x, ok := jsonRsp.Error.(string)
