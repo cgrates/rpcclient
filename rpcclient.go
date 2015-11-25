@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
@@ -32,10 +34,14 @@ import (
 )
 
 const (
-	JSON_RPC     = "json"
-	JSON_HTTP    = "http_jsonrpc"
-	GOB_RPC      = "gob"
-	INTERNAL_RPC = "internal"
+	JSON_RPC       = "json"
+	JSON_HTTP      = "http_jsonrpc"
+	GOB_RPC        = "gob"
+	INTERNAL_RPC   = "internal"
+	POOL_FIRST     = "first"
+	POOL_RANDOM    = "random"
+	POOL_NEXT      = "next"
+	POOL_BROADCAST = "broadcast"
 )
 
 var (
@@ -116,7 +122,7 @@ func (self *RpcClient) reconnect() (err error) {
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	err := self.connection.Call(serviceMethod, args, reply)
-	if err != nil && (err == rpc.ErrShutdown || err == ErrReqUnsynchronized) && self.reconnects != 0 {
+	if isNetworkError(err) && self.reconnects != 0 {
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
@@ -182,4 +188,71 @@ func (self *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, repl
 		return errors.New(x)
 	}
 	return json.Unmarshal(*jsonRsp.Result, reply)
+}
+
+type RpcClientPool struct {
+	transmissionType string
+	connections      []RpcClientConnection
+	counter          int
+}
+
+func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	switch pool.transmissionType {
+	case POOL_BROADCAST:
+		for _, rc := range pool.connections {
+			go rc.Call(serviceMethod, args, reply)
+		}
+	case POOL_FIRST:
+		for _, rc := range pool.connections {
+			err := rc.Call(serviceMethod, args, reply)
+			if isNetworkError(err) {
+				continue
+			}
+			return err
+		}
+	case POOL_NEXT:
+		ln := len(pool.connections)
+		rrIndexes := roundIndex(int(math.Mod(float64(pool.counter), float64(ln))), ln)
+		pool.counter++
+		for _, index := range rrIndexes {
+			err := pool.connections[index].Call(serviceMethod, args, reply)
+			if isNetworkError(err) {
+				continue
+			}
+			return err
+		}
+	case POOL_RANDOM:
+		rand.Seed(time.Now().UnixNano())
+		randomIndex := rand.Perm(len(pool.connections))
+		for _, index := range randomIndex {
+			err := pool.connections[index].Call(serviceMethod, args, reply)
+			if isNetworkError(err) {
+				continue
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+// generates round robin indexes for a slice of length max
+// starting from index start
+func roundIndex(start, max int) []int {
+	if start < 0 {
+		start = 0
+	}
+	result := make([]int, max)
+	for i := 0; i < max; i++ {
+		if start+i < max {
+			result[i] = start + i
+		} else {
+			result[i] = int(math.Abs(float64(max - (start + i))))
+		}
+	}
+	return result
+}
+
+func isNetworkError(err error) bool {
+	return err != nil && (err == rpc.ErrShutdown ||
+		err == ErrReqUnsynchronized)
 }
