@@ -196,7 +196,7 @@ type RpcClientPool struct {
 	counter          int
 }
 
-func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
 	switch pool.transmissionType {
 	case POOL_BROADCAST:
 		for _, rc := range pool.connections {
@@ -204,35 +204,35 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 		}
 	case POOL_FIRST:
 		for _, rc := range pool.connections {
-			err := rc.Call(serviceMethod, args, reply)
+			err = rc.Call(serviceMethod, args, reply)
 			if isNetworkError(err) {
 				continue
 			}
-			return err
+			return
 		}
 	case POOL_NEXT:
 		ln := len(pool.connections)
 		rrIndexes := roundIndex(int(math.Mod(float64(pool.counter), float64(ln))), ln)
 		pool.counter++
 		for _, index := range rrIndexes {
-			err := pool.connections[index].Call(serviceMethod, args, reply)
+			err = pool.connections[index].Call(serviceMethod, args, reply)
 			if isNetworkError(err) {
 				continue
 			}
-			return err
+			return
 		}
 	case POOL_RANDOM:
 		rand.Seed(time.Now().UnixNano())
 		randomIndex := rand.Perm(len(pool.connections))
 		for _, index := range randomIndex {
-			err := pool.connections[index].Call(serviceMethod, args, reply)
+			err = pool.connections[index].Call(serviceMethod, args, reply)
 			if isNetworkError(err) {
 				continue
 			}
-			return err
+			return
 		}
 	}
-	return nil
+	return
 }
 
 // generates round robin indexes for a slice of length max
