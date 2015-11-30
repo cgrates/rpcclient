@@ -196,6 +196,10 @@ type RpcClientPool struct {
 	counter          int
 }
 
+func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
+	pool.connections = append(pool.connections, rcc)
+}
+
 func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
 	switch pool.transmissionType {
 	case POOL_BROADCAST:
