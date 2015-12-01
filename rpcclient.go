@@ -196,6 +196,10 @@ type RpcClientPool struct {
 	counter          int
 }
 
+func NewRpcClientPool(transmissionType string) *RpcClientPool {
+	return &RpcClientPool{transmissionType: transmissionType}
+}
+
 func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
 	pool.connections = append(pool.connections, rcc)
 }
