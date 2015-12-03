@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -207,9 +208,22 @@ func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
 func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
 	switch pool.transmissionType {
 	case POOL_BROADCAST:
+		replyChan := make(chan *rpcReplyError, len(pool.connections))
 		for _, rc := range pool.connections {
-			go rc.Call(serviceMethod, args, reply)
+			go func(conn RpcClientConnection) {
+				// make a new pointer of the same type
+				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
+				err := conn.Call(serviceMethod, args, rpl.Interface())
+				if !isNetworkError(err) {
+					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
+				}
+			}(rc)
 		}
+		//get first response
+		re := <-replyChan
+		// put received value in the orig reply
+		reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(re.reply).Elem())
+		return re.err
 	case POOL_FIRST:
 		for _, rc := range pool.connections {
 			err = rc.Call(serviceMethod, args, reply)
@@ -241,6 +255,11 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 		}
 	}
 	return
+}
+
+type rpcReplyError struct {
+	reply interface{}
+	err   error
 }
 
 // generates round robin indexes for a slice of length max

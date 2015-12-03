@@ -80,9 +80,11 @@ func TestPoolBrodcast(t *testing.T) {
 		},
 	}
 	var response string
-	p.Call("", "", &response)
+	if err := p.Call("", "", &response); err != nil {
+		t.Error("Got error: ", err)
+	}
 	time.Sleep(1 * time.Millisecond)
-	if len(response) != 4 {
+	if len(response) != 1 {
 		t.Error("Error calling client: ", response)
 	}
 }
@@ -100,7 +102,9 @@ func TestPoolRANDOM(t *testing.T) {
 	m := make(map[string]struct{}, 4)
 	for i := 0; i < 100; i++ {
 		var response string
-		p.Call("", "", &response)
+		if err := p.Call("", "", &response); err != nil {
+			t.Error("Got error: ", err)
+		}
 		m[response] = struct{}{}
 	}
 	if len(m) < 4 { // should use them all
