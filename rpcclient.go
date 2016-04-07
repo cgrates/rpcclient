@@ -109,12 +109,15 @@ func (self *RpcClient) reconnect() (err error) {
 	}
 	i := 0
 	delay := Fib()
+	fmt.Printf("reconnect- i: %v, self.reconnects: %v", i, self.reconnects)
 	for {
-		if i != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
+		if self.reconnects != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
 			break
 		}
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
+		} else {
+			fmt.Printf("reconnect- Connect fail: %v", err)
 		}
 		time.Sleep(delay()) // Cound not reconnect, retry
 	}
@@ -122,11 +125,16 @@ func (self *RpcClient) reconnect() (err error) {
 }
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	fmt.Printf("RpcClient.Call, serviceMethod: %s, args: %+v\n", serviceMethod, args)
 	err := self.connection.Call(serviceMethod, args, reply)
+	fmt.Printf("RpcClient.Call, serviceMethod: %s, args: %+v, err: %v, reconnects: %v\n", serviceMethod, args, err, self.reconnects)
 	if isNetworkError(err) && self.reconnects != 0 {
+		fmt.Printf("RpcClient.Call, Network error, reconnects: %v\n", serviceMethod, args, self.reconnects)
 		if errReconnect := self.reconnect(); errReconnect != nil {
+			fmt.Printf("RpcClient.Call, errReconnect: %v\n", errReconnect)
 			return err
 		} else { // Run command after reconnect
+			fmt.Printf("RpcClient.Call, no error on reconnect, calling serviceMethod\n")
 			return self.connection.Call(serviceMethod, args, reply)
 		}
 	}
