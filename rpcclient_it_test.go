@@ -82,12 +82,19 @@ func startServer(srvID, listenAddr string, shutdownTimer time.Duration) error {
 	panic("Should never get here")
 }
 
-func TestITPoolFirst(t *testing.T) {
+func TestITStartServers(t *testing.T) {
 	if !*testIntegration {
 		return
 	}
 	go startServer("srv1", fmt.Sprintf("%s:%d", SrvAddr, SrvPort), 0)
 	go startServer("srv2", fmt.Sprintf("%s:%d", SrvAddr, SrvPort+1), 0)
+	go startServer("srv3", fmt.Sprintf("%s:%d", SrvAddr, SrvPort+2), 0)
+}
+
+func TestITPoolFirst(t *testing.T) {
+	if !*testIntegration {
+		return
+	}
 	clnt1, err := NewRpcClient("tcp", fmt.Sprintf("%s:%d", SrvAddr, SrvPort), 1, 0, JSON_RPC, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +114,51 @@ func TestITPoolFirst(t *testing.T) {
 	} else if srvID != eSrvID {
 		t.Errorf("Expecting: %s, received: %s", eSrvID, srvID)
 	}
+	if err := p.Call("RPC.GetServerID", "", &srvID); err != nil { // Second time should return the same
+		t.Error(err)
+	} else if srvID != eSrvID {
+		t.Errorf("Expecting: %s, received: %s", eSrvID, srvID)
+	}
+}
+
+func TestITPoolNext(t *testing.T) {
+	if !*testIntegration {
+		return
+	}
+	p := &RpcClientPool{
+		transmissionType: POOL_NEXT,
+	}
+	clnt1, err := NewRpcClient("tcp", fmt.Sprintf("%s:%d", SrvAddr, SrvPort), 1, 0, JSON_RPC, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.AddClient(clnt1)
+	clnt2, err := NewRpcClient("tcp", fmt.Sprintf("%s:%d", SrvAddr, SrvPort+1), 1, 0, JSON_RPC, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.AddClient(clnt2)
+	clnt3, err := NewRpcClient("tcp", fmt.Sprintf("%s:%d", SrvAddr, SrvPort+2), 1, 0, JSON_RPC, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.AddClient(clnt3)
+	eSrvID := "srv1"
+	var srvID string
+	fmt.Printf("Before first call")
+	if err := p.Call("RPC.GetServerID", "", &srvID); err != nil {
+		t.Error(err)
+	} else if srvID != eSrvID {
+		t.Errorf("Expecting: %s, received: %s", eSrvID, srvID)
+	}
+	fmt.Printf("After first call")
+	eSrvID = "srv2"
+	if err := p.Call("RPC.GetServerID", "", &srvID); err != nil { // Second time should return the same
+		t.Error(err)
+	} else if srvID != eSrvID {
+		t.Errorf("Expecting: %s, received: %s", eSrvID, srvID)
+	}
+	eSrvID = "srv3"
 	if err := p.Call("RPC.GetServerID", "", &srvID); err != nil { // Second time should return the same
 		t.Error(err)
 	} else if srvID != eSrvID {
