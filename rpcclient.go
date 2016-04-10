@@ -202,7 +202,9 @@ func NewRpcClientPool(transmissionType string) *RpcClientPool {
 }
 
 func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
-	pool.connections = append(pool.connections, rcc)
+	if rcc != nil {
+		pool.connections = append(pool.connections, rcc)
+	}
 }
 
 func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
@@ -280,6 +282,9 @@ func roundIndex(start, max int) []int {
 }
 
 func isNetworkError(err error) bool {
-	return err != nil && (err == rpc.ErrShutdown ||
+	if err == nil {
+		return false
+	}
+	return (err == rpc.ErrShutdown ||
 		err == ErrReqUnsynchronized)
 }
