@@ -23,14 +23,17 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	//"log/syslog"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -50,7 +53,14 @@ var (
 	ErrUnsupporteServiceMethod = errors.New("UNSUPPORTED_SERVICE_METHOD")
 	ErrWrongArgsType           = errors.New("WRONG_ARGS_TYPE")
 	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
+	//logger                     *syslog.Writer
 )
+
+/*
+func init() {
+	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
+}
+*/
 
 // successive Fibonacci numbers.
 func Fib() func() time.Duration {
@@ -284,6 +294,9 @@ func roundIndex(start, max int) []int {
 func isNetworkError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if operr, ok := err.(*net.OpError); ok && strings.HasSuffix(operr.Err.Error(), syscall.ECONNRESET.Error()) { // connection reset
+		return true
 	}
 	return (err == rpc.ErrShutdown ||
 		err == ErrReqUnsynchronized)
