@@ -53,14 +53,13 @@ var (
 	ErrUnsupporteServiceMethod = errors.New("UNSUPPORTED_SERVICE_METHOD")
 	ErrWrongArgsType           = errors.New("WRONG_ARGS_TYPE")
 	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
+	ErrDisconnected            = errors.New("DISCONNECTED")
 	//logger                     *syslog.Writer
 )
 
-/*
 func init() {
-	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
+	//logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
 }
-*/
 
 // successive Fibonacci numbers.
 func Fib() func() time.Duration {
@@ -110,6 +109,9 @@ func (self *RpcClient) connect() (err error) {
 	default:
 		self.connection, err = rpc.Dial(self.transport, self.address)
 	}
+	if err != nil {
+		self.connection = nil // So we don't wrap nil into the interface
+	}
 	return
 }
 
@@ -126,13 +128,18 @@ func (self *RpcClient) reconnect() (err error) {
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
 		}
+		i++
 		time.Sleep(delay()) // Cound not reconnect, retry
 	}
 	return errors.New("RECONNECT_FAIL")
 }
 
-func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	err := self.connection.Call(serviceMethod, args, reply)
+func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	if self.connection == nil {
+		err = ErrDisconnected
+	} else {
+		err = self.connection.Call(serviceMethod, args, reply)
+	}
 	if isNetworkError(err) && self.reconnects != 0 {
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
@@ -299,5 +306,5 @@ func isNetworkError(err error) bool {
 		return true
 	}
 	return (err == rpc.ErrShutdown ||
-		err == ErrReqUnsynchronized)
+		err == ErrReqUnsynchronized || err == ErrDisconnected)
 }
