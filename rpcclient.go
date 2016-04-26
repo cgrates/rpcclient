@@ -41,7 +41,7 @@ const (
 	JSON_RPC       = "json"
 	JSON_HTTP      = "http_jsonrpc"
 	GOB_RPC        = "gob"
-	INTERNAL_RPC   = "internal"
+	INTERNAL_RPC   = "*internal"
 	POOL_FIRST     = "first"
 	POOL_RANDOM    = "random"
 	POOL_NEXT      = "next"
