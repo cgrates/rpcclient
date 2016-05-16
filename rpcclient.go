@@ -302,6 +302,8 @@ func isNetworkError(err error) bool {
 	if operr, ok := err.(*net.OpError); ok && strings.HasSuffix(operr.Err.Error(), syscall.ECONNRESET.Error()) { // connection reset
 		return true
 	}
-	return (err == rpc.ErrShutdown ||
-		err == ErrReqUnsynchronized || err == ErrDisconnected)
+	return err == rpc.ErrShutdown ||
+		err == ErrReqUnsynchronized ||
+		err == ErrDisconnected ||
+		strings.HasPrefix(err.Error(), "rpc: can't find service")
 }
