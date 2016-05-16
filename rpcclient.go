@@ -81,10 +81,7 @@ func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec
 		}
 		time.Sleep(delay())
 	}
-	if err != nil {
-		return nil, err
-	}
-	return rpcClient, nil
+	return rpcClient, err
 }
 
 type RpcClient struct {
