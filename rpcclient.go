@@ -54,6 +54,7 @@ var (
 	ErrWrongArgsType           = errors.New("WRONG_ARGS_TYPE")
 	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
 	ErrDisconnected            = errors.New("DISCONNECTED")
+	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
 	//logger                     *syslog.Writer
 )
 
@@ -70,9 +71,9 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
+func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
 	var err error
-	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
+	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
 		err = rpcClient.connect()
@@ -85,26 +86,34 @@ func NewRpcClient(transport, addr string, connectAttempts, reconnects int, codec
 }
 
 type RpcClient struct {
-	transport  string
-	address    string
-	reconnects int
-	codec      string // JSON_RPC or GOB_RPC
-	connection RpcClientConnection
-	connMux    *sync.Mutex
+	transport    string
+	address      string
+	reconnects   int
+	connTimeout  time.Duration
+	replyTimeout time.Duration
+	codec        string // JSON_RPC or GOB_RPC
+	connection   RpcClientConnection
+	connMux      *sync.Mutex
 }
 
 func (self *RpcClient) connect() (err error) {
 	self.connMux.Lock()
 	defer self.connMux.Unlock()
-	switch self.codec {
-	case JSON_RPC:
-		self.connection, err = jsonrpc.Dial(self.transport, self.address)
-	case JSON_HTTP:
+	if self.codec == INTERNAL_RPC {
+		return nil
+	} else if self.codec == JSON_HTTP {
 		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
-	case INTERNAL_RPC:
-		return nil // connection should be set on init
-	default:
-		self.connection, err = rpc.Dial(self.transport, self.address)
+		return
+	}
+	// RPC compliant connections here, manually create connection to timeout
+	netconn, err := net.DialTimeout(self.transport, self.address, self.connTimeout)
+	if err != nil {
+		return err
+	}
+	if self.codec == JSON_RPC {
+		self.connection = jsonrpc.NewClient(netconn)
+	} else {
+		self.connection = rpc.NewClient(netconn)
 	}
 	if err != nil {
 		self.connection = nil // So we don't wrap nil into the interface
@@ -135,7 +144,13 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	if self.connection == nil {
 		err = ErrDisconnected
 	} else {
-		err = self.connection.Call(serviceMethod, args, reply)
+		errChan := make(chan error, 1)
+		go func() { errChan <- self.connection.Call(serviceMethod, args, reply) }()
+		select {
+		case err = <-errChan:
+		case <-time.After(self.replyTimeout):
+			err = ErrReplyTimeout
+		}
 	}
 	if isNetworkError(err) && self.reconnects != 0 {
 		if errReconnect := self.reconnect(); errReconnect != nil {
@@ -305,5 +320,6 @@ func isNetworkError(err error) bool {
 	return err == rpc.ErrShutdown ||
 		err == ErrReqUnsynchronized ||
 		err == ErrDisconnected ||
+		err == ErrReplyTimeout ||
 		strings.HasPrefix(err.Error(), "rpc: can't find service")
 }
