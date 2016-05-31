@@ -224,10 +224,11 @@ type RpcClientPool struct {
 	transmissionType string
 	connections      []RpcClientConnection
 	counter          int
+	replyTimeout     time.Duration
 }
 
-func NewRpcClientPool(transmissionType string) *RpcClientPool {
-	return &RpcClientPool{transmissionType: transmissionType}
+func NewRpcClientPool(transmissionType string, replyTimeout time.Duration) *RpcClientPool {
+	return &RpcClientPool{transmissionType: transmissionType, replyTimeout: replyTimeout}
 }
 
 func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
@@ -250,8 +251,13 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 				}
 			}(rc)
 		}
-		//get first response
-		re := <-replyChan
+		//get first response with timeout
+		var re *rpcReplyError
+		select {
+		case re = <-replyChan:
+		case <-time.After(pool.replyTimeout):
+			return ErrReplyTimeout
+		}
 		// put received value in the orig reply
 		reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(re.reply).Elem())
 		return re.err
