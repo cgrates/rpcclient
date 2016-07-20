@@ -141,6 +141,9 @@ func (self *RpcClient) reconnect() (err error) {
 }
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	if args == nil {
+		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
+	}
 	if self.connection == nil {
 		err = ErrDisconnected
 	} else {
