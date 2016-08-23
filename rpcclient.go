@@ -73,7 +73,8 @@ func Fib() func() time.Duration {
 
 func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
 	var err error
-	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects, connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
+	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects,
+		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
 		err = rpcClient.connect()
@@ -145,18 +146,20 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		err = ErrDisconnected
 	} else {
 		errChan := make(chan error, 1)
-		go func() { errChan <- self.connection.Call(serviceMethod, args, reply) }()
+		go func() {
+			errChan <- self.connection.Call(serviceMethod, args, reply)
+		}()
 		select {
 		case err = <-errChan:
 		case <-time.After(self.replyTimeout):
 			err = ErrReplyTimeout
 		}
 	}
-	if isNetworkError(err) && self.reconnects != 0 {
+	if isNetworkError(err) && err != ErrReplyTimeout && self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
-			return self.connection.Call(serviceMethod, args, reply)
+			return self.Call(serviceMethod, args, reply)
 		}
 	}
 	return err
