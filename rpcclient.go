@@ -1,6 +1,6 @@
 /*
 RpcClient for Go RPC Servers
-Copyright (C) 2012-2014 ITsysCOM GmbH
+Copyright (C) ITsysCOM GmbH
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -109,15 +109,13 @@ func (self *RpcClient) connect() (err error) {
 	// RPC compliant connections here, manually create connection to timeout
 	netconn, err := net.DialTimeout(self.transport, self.address, self.connTimeout)
 	if err != nil {
+		self.connection = nil // So we don't wrap nil into the interface
 		return err
 	}
 	if self.codec == JSON_RPC {
 		self.connection = jsonrpc.NewClient(netconn)
 	} else {
 		self.connection = rpc.NewClient(netconn)
-	}
-	if err != nil {
-		self.connection = nil // So we don't wrap nil into the interface
 	}
 	return
 }
