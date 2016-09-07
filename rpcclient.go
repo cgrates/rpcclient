@@ -67,7 +67,7 @@ func Fib() func() time.Duration {
 	a, b := 0, 1
 	return func() time.Duration {
 		a, b = b, a+b
-		return time.Duration(a) * time.Second
+		return time.Duration(a*10) * time.Millisecond
 	}
 }
 
@@ -121,19 +121,22 @@ func (self *RpcClient) connect() (err error) {
 }
 
 func (self *RpcClient) reconnect() (err error) {
+	if self.reconnects == 0 {
+		return nil // no reconnects
+	}
 	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
 		return self.connect()
 	}
 	i := 0
 	delay := Fib()
 	for {
-		if self.reconnects != -1 && i >= self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
+		i++
+		if self.reconnects != -1 && i > self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
 			break
 		}
 		if err = self.connect(); err == nil { // No error on connect, succcess
 			return nil
 		}
-		i++
 		time.Sleep(delay()) // Cound not reconnect, retry
 	}
 	return errors.New("RECONNECT_FAIL")
