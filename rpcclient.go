@@ -55,6 +55,7 @@ var (
 	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
 	ErrDisconnected            = errors.New("DISCONNECTED")
 	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
+	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
 	//logger                     *syslog.Writer
 )
 
@@ -139,7 +140,7 @@ func (self *RpcClient) reconnect() (err error) {
 		}
 		time.Sleep(delay()) // Cound not reconnect, retry
 	}
-	return errors.New("RECONNECT_FAIL")
+	return ErrFailedReconnect
 }
 
 func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
@@ -163,7 +164,7 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
-			return self.Call(serviceMethod, args, reply)
+			return self.connection.Call(serviceMethod, args, reply)
 		}
 	}
 	return err
