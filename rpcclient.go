@@ -151,9 +151,9 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		err = ErrDisconnected
 	} else {
 		errChan := make(chan error, 1)
-		go func() {
+		go func(serviceMethod string, args interface{}, reply interface{}) {
 			errChan <- self.connection.Call(serviceMethod, args, reply)
-		}()
+		}(serviceMethod, args, reply)
 		select {
 		case err = <-errChan:
 		case <-time.After(self.replyTimeout):
