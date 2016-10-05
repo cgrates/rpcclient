@@ -121,10 +121,26 @@ func (self *RpcClient) connect() (err error) {
 	return
 }
 
+func (self *RpcClient) disconnect() (err error) {
+	switch self.codec {
+	case INTERNAL_RPC, JSON_HTTP:
+	default:
+		if self.connection == nil {
+			return nil
+		}
+		self.connMux.Lock()
+		self.connection.(*rpc.Client).Close()
+		self.connection = nil
+		self.connMux.Unlock()
+	}
+	return nil
+}
+
 func (self *RpcClient) reconnect() (err error) {
 	if self.reconnects == 0 {
 		return nil // no reconnects
 	}
+	self.disconnect()            // make sure we have cleared the connection so it can be garbage collected
 	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
 		return self.connect()
 	}
