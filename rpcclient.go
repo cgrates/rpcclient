@@ -266,7 +266,7 @@ func NewRpcClientPool(transmissionType string, replyTimeout time.Duration) *RpcC
 }
 
 func (pool *RpcClientPool) AddClient(rcc RpcClientConnection) {
-	if rcc != nil {
+	if rcc != nil && !reflect.ValueOf(rcc).IsNil() {
 		pool.connections = append(pool.connections, rcc)
 	}
 }
