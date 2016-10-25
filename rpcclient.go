@@ -23,7 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	//"log/syslog"
+	"log/syslog"
 	"math"
 	"math/rand"
 	"net"
@@ -56,11 +56,11 @@ var (
 	ErrDisconnected            = errors.New("DISCONNECTED")
 	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
 	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
-	//logger                     *syslog.Writer
+	logger                     *syslog.Writer
 )
 
 func init() {
-	//logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
+	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
 }
 
 // successive Fibonacci numbers.
@@ -75,7 +75,7 @@ func Fib() func() time.Duration {
 func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
 	var err error
 	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects,
-		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn, connMux: new(sync.Mutex)}
+		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
 		err = rpcClient.connect()
@@ -95,14 +95,14 @@ type RpcClient struct {
 	replyTimeout time.Duration
 	codec        string // JSON_RPC or GOB_RPC
 	connection   RpcClientConnection
-	connMux      *sync.Mutex
+	connMux      sync.RWMutex // protects connection
 }
 
 func (self *RpcClient) connect() (err error) {
 	self.connMux.Lock()
 	defer self.connMux.Unlock()
 	if self.codec == INTERNAL_RPC {
-		return nil
+		return
 	} else if self.codec == JSON_HTTP {
 		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
 		return
@@ -121,11 +121,17 @@ func (self *RpcClient) connect() (err error) {
 	return
 }
 
+func (self *RpcClient) isConnected() bool {
+	self.connMux.RLock()
+	defer self.connMux.RUnlock()
+	return self.connection != nil
+}
+
 func (self *RpcClient) disconnect() (err error) {
 	switch self.codec {
 	case INTERNAL_RPC, JSON_HTTP:
 	default:
-		if self.connection == nil {
+		if !self.isConnected() {
 			return nil
 		}
 		self.connMux.Lock()
@@ -163,11 +169,13 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	if args == nil {
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
-	if self.connection == nil {
+	if !self.isConnected() {
 		err = ErrDisconnected
 	} else {
 		errChan := make(chan error, 1)
 		go func(serviceMethod string, args interface{}, reply interface{}) {
+			self.connMux.RLock()
+			defer self.connMux.RUnlock()
 			errChan <- self.connection.Call(serviceMethod, args, reply)
 		}(serviceMethod, args, reply)
 		select {
@@ -180,6 +188,8 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
+			self.connMux.RLock()
+			defer self.connMux.RUnlock()
 			return self.connection.Call(serviceMethod, args, reply)
 		}
 	}
