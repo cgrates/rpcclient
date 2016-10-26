@@ -57,6 +57,7 @@ var (
 	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
 	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
 	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
+	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
 	logger                     *syslog.Writer
 )
 
@@ -74,6 +75,9 @@ func Fib() func() time.Duration {
 }
 
 func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
+	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
+		return nil, ErrUnsupportedCodec
+	}
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
@@ -106,6 +110,9 @@ func (self *RpcClient) connect() (err error) {
 	self.connMux.Lock()
 	defer self.connMux.Unlock()
 	if self.codec == INTERNAL_RPC {
+		if self.connection == nil {
+			return ErrDisconnected
+		}
 		return
 	} else if self.codec == JSON_HTTP {
 		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
