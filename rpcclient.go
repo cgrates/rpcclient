@@ -176,7 +176,11 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		go func(serviceMethod string, args interface{}, reply interface{}) {
 			self.connMux.RLock()
 			defer self.connMux.RUnlock()
-			errChan <- self.connection.Call(serviceMethod, args, reply)
+			if self.connection == nil {
+				errChan <- ErrDisconnected
+			} else {
+				errChan <- self.connection.Call(serviceMethod, args, reply)
+			}
 		}(serviceMethod, args, reply)
 		select {
 		case err = <-errChan:
