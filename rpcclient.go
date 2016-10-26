@@ -172,25 +172,22 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	if args == nil {
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
-	if !self.isConnected() {
-		err = ErrDisconnected
-	} else {
-		errChan := make(chan error, 1)
-		go func(serviceMethod string, args interface{}, reply interface{}) {
-			self.connMux.RLock()
-			defer self.connMux.RUnlock()
-			if self.connection == nil {
-				errChan <- ErrDisconnected
-			} else {
-				errChan <- self.connection.Call(serviceMethod, args, reply)
-			}
-		}(serviceMethod, args, reply)
-		select {
-		case err = <-errChan:
-		case <-time.After(self.replyTimeout):
-			err = ErrReplyTimeout
+	errChan := make(chan error, 1)
+	go func(serviceMethod string, args interface{}, reply interface{}) {
+		self.connMux.RLock()
+		if self.connection == nil {
+			errChan <- ErrDisconnected
+		} else {
+			errChan <- self.connection.Call(serviceMethod, args, reply)
 		}
+		self.connMux.RUnlock()
+	}(serviceMethod, args, reply)
+	select {
+	case err = <-errChan:
+	case <-time.After(self.replyTimeout):
+		err = ErrReplyTimeout
 	}
+
 	if isNetworkError(err) && err != ErrReplyTimeout && self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
