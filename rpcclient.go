@@ -56,6 +56,7 @@ var (
 	ErrDisconnected            = errors.New("DISCONNECTED")
 	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
 	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
+	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
 	logger                     *syslog.Writer
 )
 
@@ -73,6 +74,9 @@ func Fib() func() time.Duration {
 }
 
 func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
+	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
+		return nil, ErrInternallyDisconnected
+	}
 	var err error
 	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects,
 		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn}
@@ -131,12 +135,11 @@ func (self *RpcClient) disconnect() (err error) {
 	switch self.codec {
 	case INTERNAL_RPC, JSON_HTTP:
 	default:
-		if !self.isConnected() {
-			return nil
-		}
 		self.connMux.Lock()
-		self.connection.(*rpc.Client).Close()
-		self.connection = nil
+		if self.connection != nil {
+			self.connection.(*rpc.Client).Close()
+			self.connection = nil
+		}
 		self.connMux.Unlock()
 	}
 	return nil
