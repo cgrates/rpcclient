@@ -153,9 +153,6 @@ func (self *RpcClient) disconnect() (err error) {
 }
 
 func (self *RpcClient) reconnect() (err error) {
-	if self.reconnects == 0 {
-		return nil // no reconnects
-	}
 	self.disconnect()            // make sure we have cleared the connection so it can be garbage collected
 	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
 		return self.connect()
@@ -194,14 +191,17 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	case <-time.After(self.replyTimeout):
 		err = ErrReplyTimeout
 	}
-
 	if isNetworkError(err) && err != ErrReplyTimeout && self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
 			self.connMux.RLock()
 			defer self.connMux.RUnlock()
-			return self.connection.Call(serviceMethod, args, reply)
+			if self.connection == nil {
+				err = ErrDisconnected
+			} else {
+				return self.connection.Call(serviceMethod, args, reply)
+			}
 		}
 	}
 	return err
