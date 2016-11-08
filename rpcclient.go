@@ -74,16 +74,18 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection) (*RpcClient, error) {
+func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
 		return nil, ErrUnsupportedCodec
 	}
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
-	var err error
-	rpcClient := &RpcClient{transport: transport, address: addr, reconnects: reconnects,
+	rpcClient = &RpcClient{transport: transport, address: addr, reconnects: reconnects,
 		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn}
+	if lazyConnect {
+		return
+	}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
 		err = rpcClient.connect()
