@@ -58,6 +58,7 @@ var (
 	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
 	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
 	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
+	ErrSessionNotFound         = errors.New("SESSION_NOT_FOUND")
 	logger                     *syslog.Writer
 )
 
@@ -193,7 +194,9 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	case <-time.After(self.replyTimeout):
 		err = ErrReplyTimeout
 	}
-	if isNetworkError(err) && err != ErrReplyTimeout && self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
+	if isNetworkError(err) && err != ErrReplyTimeout &&
+		err.Error() != ErrSessionNotFound.Error() &&
+		self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
 		} else { // Run command after reconnect
@@ -374,5 +377,6 @@ func isNetworkError(err error) bool {
 		err == ErrReqUnsynchronized ||
 		err == ErrDisconnected ||
 		err == ErrReplyTimeout ||
+		err.Error() == ErrSessionNotFound.Error() ||
 		strings.HasPrefix(err.Error(), "rpc: can't find service")
 }
