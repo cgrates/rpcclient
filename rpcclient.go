@@ -179,6 +179,7 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 	if args == nil {
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
+	rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface() // clone to avoid concurrency
 	errChan := make(chan error, 1)
 	go func(serviceMethod string, args interface{}, reply interface{}) {
 		self.connMux.RLock()
@@ -188,7 +189,7 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 			errChan <- self.connection.Call(serviceMethod, args, reply)
 		}
 		self.connMux.RUnlock()
-	}(serviceMethod, args, reply)
+	}(serviceMethod, args, rpl)
 	select {
 	case err = <-errChan:
 	case <-time.After(self.replyTimeout):
@@ -199,17 +200,11 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := self.reconnect(); errReconnect != nil {
 			return err
-		} else { // Run command after reconnect
-			self.connMux.RLock()
-			defer self.connMux.RUnlock()
-			if self.connection == nil {
-				err = ErrDisconnected
-			} else {
-				return self.connection.Call(serviceMethod, args, reply)
-			}
 		}
+		return self.Call(serviceMethod, args, reply)
 	}
-	return err
+	reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem()) // no errors, copy the reply from clone
+	return
 }
 
 // Connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
@@ -313,12 +308,10 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 		return re.err
 	case POOL_FIRST:
 		for _, rc := range pool.connections {
-			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface()
-			err = rc.Call(serviceMethod, args, rpl)
+			err = rc.Call(serviceMethod, args, reply)
 			if isNetworkError(err) {
 				continue
 			}
-			reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem())
 			return
 		}
 	case POOL_NEXT:

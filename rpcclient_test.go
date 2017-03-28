@@ -42,7 +42,7 @@ func TestPoolFirst(t *testing.T) {
 		},
 	}
 	p.Call("", "", &response)
-	if response != "2" {
+	if response != "12" {
 		t.Error("Error calling client: ", response)
 	}
 }
