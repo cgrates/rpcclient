@@ -313,10 +313,12 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 		return re.err
 	case POOL_FIRST:
 		for _, rc := range pool.connections {
-			err = rc.Call(serviceMethod, args, reply)
+			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface()
+			err = rc.Call(serviceMethod, args, rpl)
 			if isNetworkError(err) {
 				continue
 			}
+			reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem())
 			return
 		}
 	case POOL_NEXT:
