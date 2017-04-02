@@ -186,6 +186,14 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		if self.connection == nil {
 			errChan <- ErrDisconnected
 		} else {
+			if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
+				if argsCloned, err := argsClnIface.RPCClone(); err != nil {
+					errChan <- err
+					return
+				} else {
+					args = argsCloned
+				}
+			}
 			errChan <- self.connection.Call(serviceMethod, args, reply)
 		}
 		self.connMux.RUnlock()
@@ -212,6 +220,11 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 // Connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
 type RpcClientConnection interface {
 	Call(string, interface{}, interface{}) error
+}
+
+// RPCCloner is an interface for objects to clone parts of themselves which are affected by concurrency at the time of RPC call
+type RPCCloner interface {
+	RPCClone() (interface{}, error)
 }
 
 // Response received for
