@@ -19,10 +19,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package rpcclient
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"log/syslog"
 	"math"
 	"math/rand"
@@ -75,15 +79,20 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connTimeout, replyTimeout time.Duration, codec string, internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
+func NewRpcClient(transport, addr, key_path, cert_path string, connectAttempts, reconnects int,
+	connTimeout, replyTimeout time.Duration, codec string,
+	internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
 		return nil, ErrUnsupportedCodec
 	}
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
-	rpcClient = &RpcClient{transport: transport, address: addr, reconnects: reconnects,
-		connTimeout: connTimeout, replyTimeout: replyTimeout, codec: codec, connection: internalConn}
+	rpcClient = &RpcClient{transport: transport, tls: (key_path != "" && cert_path != ""),
+		address: addr, key_path: key_path,
+		cert_path: cert_path, reconnects: reconnects,
+		connTimeout: connTimeout, replyTimeout: replyTimeout,
+		codec: codec, connection: internalConn}
 	if lazyConnect {
 		return
 	}
@@ -100,7 +109,10 @@ func NewRpcClient(transport, addr string, connectAttempts, reconnects int, connT
 
 type RpcClient struct {
 	transport    string
+	tls          bool
 	address      string
+	key_path     string
+	cert_path    string
 	reconnects   int
 	connTimeout  time.Duration
 	replyTimeout time.Duration
@@ -121,12 +133,38 @@ func (self *RpcClient) connect() (err error) {
 		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
 		return
 	}
-	// RPC compliant connections here, manually create connection to timeout
-	netconn, err := net.DialTimeout(self.transport, self.address, self.connTimeout)
-	if err != nil {
-		self.connection = nil // So we don't wrap nil into the interface
-		return err
+	var netconn io.ReadWriteCloser
+	if self.tls {
+		cert, err := tls.LoadX509KeyPair(self.cert_path, self.key_path)
+		if err != nil {
+			log.Fatalf("Error: %s when load client keys", err)
+		}
+		if len(cert.Certificate) != 2 {
+			log.Fatalf("%s should have 2 concatenated certificates: client + CA", self.cert_path)
+		}
+		ca, err := x509.ParseCertificate(cert.Certificate[1])
+		if err != nil {
+			log.Fatal(err)
+		}
+		certPool := x509.NewCertPool()
+		certPool.AddCert(ca)
+		config := tls.Config{
+			Certificates: []tls.Certificate{cert},
+			RootCAs:      certPool,
+		}
+		netconn, err = tls.Dial(self.transport, self.address, &config)
+		if err != nil {
+			log.Fatalf("Error: %s when dialing", err)
+		}
+	} else {
+		// RPC compliant connections here, manually create connection to timeout
+		netconn, err = net.DialTimeout(self.transport, self.address, self.connTimeout)
+		if err != nil {
+			self.connection = nil // So we don't wrap nil into the interface
+			return err
+		}
 	}
+
 	if self.codec == JSON_RPC {
 		self.connection = jsonrpc.NewClient(netconn)
 	} else {
