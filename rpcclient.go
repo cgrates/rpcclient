@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"log/syslog"
 	"math"
 	"math/rand"
@@ -138,13 +137,16 @@ func (self *RpcClient) connect() (err error) {
 		cert, err := tls.LoadX509KeyPair(self.cert_path, self.key_path)
 		if err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when load client keys", err))
+			return
 		}
 		if len(cert.Certificate) != 2 {
 			logger.Crit(fmt.Sprintf("%s should have 2 concatenated certificates: client + CA", self.cert_path))
+			return
 		}
 		ca, err := x509.ParseCertificate(cert.Certificate[1])
 		if err != nil {
-			log.Fatal(err)
+			logger.Crit(err.Error())
+			return
 		}
 		certPool := x509.NewCertPool()
 		certPool.AddCert(ca)
@@ -154,7 +156,8 @@ func (self *RpcClient) connect() (err error) {
 		}
 		netconn, err = tls.Dial(self.transport, self.address, &config)
 		if err != nil {
-			logger.Crit(fmt.Sprintf("Error: %s when dialing", err))
+			logger.Crit(fmt.Sprintf("Error: %s when dialing", err.Error()))
+			return
 		}
 	} else {
 		// RPC compliant connections here, manually create connection to timeout
