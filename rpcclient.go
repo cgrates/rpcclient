@@ -137,10 +137,10 @@ func (self *RpcClient) connect() (err error) {
 	if self.tls {
 		cert, err := tls.LoadX509KeyPair(self.cert_path, self.key_path)
 		if err != nil {
-			log.Fatalf("Error: %s when load client keys", err)
+			logger.Crit(fmt.Sprintf("Error: %s when load client keys", err))
 		}
 		if len(cert.Certificate) != 2 {
-			log.Fatalf("%s should have 2 concatenated certificates: client + CA", self.cert_path)
+			logger.Crit(fmt.Sprintf("%s should have 2 concatenated certificates: client + CA", self.cert_path))
 		}
 		ca, err := x509.ParseCertificate(cert.Certificate[1])
 		if err != nil {
@@ -154,7 +154,7 @@ func (self *RpcClient) connect() (err error) {
 		}
 		netconn, err = tls.Dial(self.transport, self.address, &config)
 		if err != nil {
-			log.Fatalf("Error: %s when dialing", err)
+			logger.Crit(fmt.Sprintf("Error: %s when dialing", err))
 		}
 	} else {
 		// RPC compliant connections here, manually create connection to timeout
