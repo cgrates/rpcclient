@@ -120,6 +120,30 @@ type RpcClient struct {
 	connMux      sync.RWMutex // protects connection
 }
 
+func loadTLSConfig(serverCrt, serverKey string) (config tls.Config, err error) {
+	cert, err := tls.LoadX509KeyPair(serverCrt, serverKey)
+	if err != nil {
+		logger.Crit(fmt.Sprintf("Error: %s when load client keys", err))
+		return
+	}
+	if len(cert.Certificate) != 2 {
+		logger.Crit(fmt.Sprintf("%s should have 2 concatenated certificates: client + CA", serverCrt))
+		return
+	}
+	ca, err := x509.ParseCertificate(cert.Certificate[1])
+	if err != nil {
+		logger.Crit(err.Error())
+		return
+	}
+	certPool := x509.NewCertPool()
+	certPool.AddCert(ca)
+	config = tls.Config{
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      certPool,
+	}
+	return
+}
+
 func (self *RpcClient) connect() (err error) {
 	self.connMux.Lock()
 	defer self.connMux.Unlock()
@@ -129,30 +153,24 @@ func (self *RpcClient) connect() (err error) {
 		}
 		return
 	} else if self.codec == JSON_HTTP {
-		self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
+		if self.tls {
+			config, err := loadTLSConfig(self.cert_path, self.key_path)
+			if err != nil {
+				return err
+			}
+			transport := &http.Transport{TLSClientConfig: &config}
+			client := &http.Client{Transport: transport}
+			self.connection = &HttpJsonRpcClient{httpClient: client, url: self.address}
+		} else {
+			self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
+		}
 		return
 	}
 	var netconn io.ReadWriteCloser
 	if self.tls {
-		cert, err := tls.LoadX509KeyPair(self.cert_path, self.key_path)
+		config, err := loadTLSConfig(self.cert_path, self.key_path)
 		if err != nil {
-			logger.Crit(fmt.Sprintf("Error: %s when load client keys", err))
 			return err
-		}
-		if len(cert.Certificate) != 2 {
-			logger.Crit(fmt.Sprintf("%s should have 2 concatenated certificates: client + CA", self.cert_path))
-			return err
-		}
-		ca, err := x509.ParseCertificate(cert.Certificate[1])
-		if err != nil {
-			logger.Crit(err.Error())
-			return err
-		}
-		certPool := x509.NewCertPool()
-		certPool.AddCert(ca)
-		config := tls.Config{
-			Certificates: []tls.Certificate{cert},
-			RootCAs:      certPool,
 		}
 		netconn, err = tls.Dial(self.transport, self.address, &config)
 		if err != nil {
