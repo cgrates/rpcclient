@@ -78,7 +78,7 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr, key_path, cert_path string, connectAttempts, reconnects int,
+func NewRpcClient(transport, addr, key_path, cert_path, ca_path string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
@@ -87,9 +87,9 @@ func NewRpcClient(transport, addr, key_path, cert_path string, connectAttempts, 
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
-	rpcClient = &RpcClient{transport: transport, tls: (key_path != "" && cert_path != ""),
+	rpcClient = &RpcClient{transport: transport, tls: (key_path != "" && cert_path != "" && ca_path != ""),
 		address: addr, key_path: key_path,
-		cert_path: cert_path, reconnects: reconnects,
+		cert_path: cert_path, ca_path: ca_path, reconnects: reconnects,
 		connTimeout: connTimeout, replyTimeout: replyTimeout,
 		codec: codec, connection: internalConn}
 	if lazyConnect {
@@ -112,6 +112,7 @@ type RpcClient struct {
 	address      string
 	key_path     string
 	cert_path    string
+	ca_path      string
 	reconnects   int
 	connTimeout  time.Duration
 	replyTimeout time.Duration
@@ -120,26 +121,38 @@ type RpcClient struct {
 	connMux      sync.RWMutex // protects connection
 }
 
-func loadTLSConfig(serverCrt, serverKey string) (config tls.Config, err error) {
-	cert, err := tls.LoadX509KeyPair(serverCrt, serverKey)
+func loadTLSConfig(clientCrt, clientKey, caPath string) (config tls.Config, err error) {
+	cert, err := tls.LoadX509KeyPair(clientCrt, clientKey)
 	if err != nil {
-		logger.Crit(fmt.Sprintf("Error: %s when load client keys", err))
+		logger.Crit(fmt.Sprintf("Error: %s when load client cert and key", err))
 		return
 	}
-	if len(cert.Certificate) != 2 {
-		logger.Crit(fmt.Sprintf("%s should have 2 concatenated certificates: client + CA", serverCrt))
-		return
-	}
-	ca, err := x509.ParseCertificate(cert.Certificate[1])
+
+	rootCAs, err := x509.SystemCertPool()
 	if err != nil {
-		logger.Crit(err.Error())
+		logger.Crit(fmt.Sprintf("Error: %s when load SystemCertPool", err))
 		return
 	}
-	certPool := x509.NewCertPool()
-	certPool.AddCert(ca)
+	if rootCAs == nil {
+		rootCAs = x509.NewCertPool()
+	}
+
+	if caPath != "" {
+		ca, err := ioutil.ReadFile(caPath)
+		if err != nil {
+			logger.Crit(fmt.Sprintf("Error: %s when read CA", err))
+			return config, err
+		}
+
+		if ok := rootCAs.AppendCertsFromPEM(ca); !ok {
+			logger.Crit(fmt.Sprintf("Cannot append certificate authority"))
+			return config, err
+		}
+	}
+
 	config = tls.Config{
 		Certificates: []tls.Certificate{cert},
-		RootCAs:      certPool,
+		RootCAs:      rootCAs,
 	}
 	return
 }
@@ -154,7 +167,7 @@ func (self *RpcClient) connect() (err error) {
 		return
 	} else if self.codec == JSON_HTTP {
 		if self.tls {
-			config, err := loadTLSConfig(self.cert_path, self.key_path)
+			config, err := loadTLSConfig(self.cert_path, self.key_path, self.ca_path)
 			if err != nil {
 				return err
 			}
@@ -168,7 +181,7 @@ func (self *RpcClient) connect() (err error) {
 	}
 	var netconn io.ReadWriteCloser
 	if self.tls {
-		config, err := loadTLSConfig(self.cert_path, self.key_path)
+		config, err := loadTLSConfig(self.cert_path, self.key_path, self.ca_path)
 		if err != nil {
 			return err
 		}
