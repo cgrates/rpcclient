@@ -78,7 +78,8 @@ func Fib() func() time.Duration {
 	}
 }
 
-func NewRpcClient(transport, addr, key_path, cert_path, ca_path string, connectAttempts, reconnects int,
+func NewRpcClient(transport, addr string, tls bool,
+	key_path, cert_path, ca_path string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
@@ -87,7 +88,7 @@ func NewRpcClient(transport, addr, key_path, cert_path, ca_path string, connectA
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
-	rpcClient = &RpcClient{transport: transport, tls: (key_path != "" && cert_path != "" && ca_path != ""),
+	rpcClient = &RpcClient{transport: transport, tls: tls,
 		address: addr, key_path: key_path,
 		cert_path: cert_path, ca_path: ca_path, reconnects: reconnects,
 		connTimeout: connTimeout, replyTimeout: replyTimeout,
