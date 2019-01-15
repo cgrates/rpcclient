@@ -123,10 +123,13 @@ type RpcClient struct {
 }
 
 func loadTLSConfig(clientCrt, clientKey, caPath string) (config tls.Config, err error) {
-	cert, err := tls.LoadX509KeyPair(clientCrt, clientKey)
-	if err != nil {
-		logger.Crit(fmt.Sprintf("Error: %s when load client cert and key", err))
-		return
+	var cert tls.Certificate
+	if clientCrt != "" && clientKey != "" {
+		cert, err = tls.LoadX509KeyPair(clientCrt, clientKey)
+		if err != nil {
+			logger.Crit(fmt.Sprintf("Error: %s when load client cert and key", err))
+			return config, err
+		}
 	}
 
 	rootCAs, err := x509.SystemCertPool()
