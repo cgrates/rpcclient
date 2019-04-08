@@ -2,7 +2,6 @@ package rpcclient
 
 import (
 	"testing"
-	//"time"
 )
 
 type MockRpcClient struct {
