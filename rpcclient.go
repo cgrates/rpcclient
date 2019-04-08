@@ -81,18 +81,27 @@ func Fib() func() time.Duration {
 func NewRpcClient(transport, addr string, tls bool,
 	key_path, cert_path, ca_path string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
-	internalConn RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
+	internalChan chan RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
 		return nil, ErrUnsupportedCodec
 	}
-	if codec == INTERNAL_RPC && reflect.ValueOf(internalConn).IsNil() {
+	if codec == INTERNAL_RPC && reflect.ValueOf(internalChan).IsNil() {
 		return nil, ErrInternallyDisconnected
 	}
-	rpcClient = &RpcClient{transport: transport, tls: tls,
-		address: addr, key_path: key_path,
-		cert_path: cert_path, ca_path: ca_path, reconnects: reconnects,
-		connTimeout: connTimeout, replyTimeout: replyTimeout,
-		codec: codec, connection: internalConn}
+	rpcClient = &RpcClient{
+		transport:    transport,
+		tls:          tls,
+		address:      addr,
+		key_path:     key_path,
+		cert_path:    cert_path,
+		ca_path:      ca_path,
+		reconnects:   reconnects,
+		connTimeout:  connTimeout,
+		replyTimeout: replyTimeout,
+		codec:        codec,
+		internalChan: internalChan,
+		// connection: internalConn,
+	}
 	if lazyConnect {
 		return
 	}
@@ -120,6 +129,7 @@ type RpcClient struct {
 	codec        string // JSON_RPC or GOB_RPC
 	connection   RpcClientConnection
 	connMux      sync.RWMutex // protects connection
+	internalChan chan RpcClientConnection
 }
 
 func loadTLSConfig(clientCrt, clientKey, caPath string) (config tls.Config, err error) {
@@ -166,7 +176,15 @@ func (self *RpcClient) connect() (err error) {
 	defer self.connMux.Unlock()
 	if self.codec == INTERNAL_RPC {
 		if self.connection == nil {
-			return ErrDisconnected
+			select {
+			case self.connection = <-self.internalChan:
+				self.internalChan <- self.connection
+				if self.connection == nil {
+					return ErrDisconnected
+				}
+			case <-time.After(self.connTimeout):
+				return ErrDisconnected
+			}
 		}
 		return
 	} else if self.codec == JSON_HTTP {
