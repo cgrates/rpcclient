@@ -305,6 +305,9 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 		}
 		self.connMux.RLock()
 		defer self.connMux.RUnlock()
+		if self.connection == nil {
+			return ErrDisconnected
+		}
 		return self.connection.Call(serviceMethod, args, reply)
 	}
 	reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem()) // no errors, copy the reply from clone
