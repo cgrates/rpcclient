@@ -1,6 +1,7 @@
 package rpcclient
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -11,6 +12,9 @@ type MockRpcClient struct {
 func (m *MockRpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	if m.id == "offline" {
 		return ErrReqUnsynchronized
+	}
+	if m.id == "error"{
+		return errors.New("Not Found")
 	}
 	*reply.(*string) += m.id
 	return nil
@@ -79,7 +83,7 @@ func TestPoolBrodcast(t *testing.T) {
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err.Error() != ErrReplyTimeout.Error() {
+	if err := p.Call("", "", &response); err !=nil  {
 		t.Error("Got error: ", err)
 	}
 	/*time.Sleep(1 * time.Millisecond)
@@ -109,5 +113,37 @@ func TestPoolRANDOM(t *testing.T) {
 	}
 	if len(m) < 4 { // should use them all
 		t.Error("Error calling client: ", m)
+	}
+}
+
+func TestPoolFirstPositive(t *testing.T) {
+	p := &RpcClientPool{
+		transmissionType: POOL_FIRST_POSITIVE,
+		connections: []RpcClientConnection{
+			&MockRpcClient{id: "error"},
+			&MockRpcClient{id: "error"},
+			&MockRpcClient{id: "3"},
+			&MockRpcClient{id: "4"},
+		},
+	}
+	var response string
+	p.Call("", "", &response)
+	if response != "3" {
+		t.Error("Error calling client: ", response)
+	}
+
+	p = &RpcClientPool{
+		transmissionType: POOL_FIRST_POSITIVE,
+		connections: []RpcClientConnection{
+			&MockRpcClient{id: "error"},
+			&MockRpcClient{id: "2"},
+			&MockRpcClient{id: "error"},
+			&MockRpcClient{id: "4"},
+		},
+	}
+	response=""
+	p.Call("", "", &response)
+	if response != "2" {
+		t.Error("Error calling client: ", response)
 	}
 }
