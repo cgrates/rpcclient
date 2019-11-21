@@ -41,15 +41,15 @@ import (
 )
 
 const (
-	JSON_RPC       = "json"
-	JSON_HTTP      = "http_jsonrpc"
-	GOB_RPC        = "gob"
-	INTERNAL_RPC   = "*internal"
-	POOL_FIRST     = "*first"
-	POOL_RANDOM    = "*random"
-	POOL_NEXT      = "*next"
-	POOL_BROADCAST = "*broadcast"
-	POOL_FIRST_POSITIVE="*first_positive"
+	JSON_RPC            = "json"
+	JSON_HTTP           = "http_jsonrpc"
+	GOB_RPC             = "gob"
+	INTERNAL_RPC        = "*internal"
+	POOL_FIRST          = "*first"
+	POOL_RANDOM         = "*random"
+	POOL_NEXT           = "*next"
+	POOL_BROADCAST      = "*broadcast"
+	POOL_FIRST_POSITIVE = "*first_positive"
 )
 
 var (
@@ -451,7 +451,7 @@ func (pool *RpcClientPool) Call(serviceMethod string, args interface{}, reply in
 	case POOL_FIRST_POSITIVE:
 		for _, rc := range pool.connections {
 			err = rc.Call(serviceMethod, args, reply)
-			if err == nil{
+			if err == nil {
 				break
 			}
 		}
