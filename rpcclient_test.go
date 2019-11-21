@@ -13,7 +13,7 @@ func (m *MockRpcClient) Call(serviceMethod string, args interface{}, reply inter
 	if m.id == "offline" {
 		return ErrReqUnsynchronized
 	}
-	if m.id == "error"{
+	if m.id == "error" {
 		return errors.New("Not Found")
 	}
 	*reply.(*string) += m.id
@@ -83,7 +83,7 @@ func TestPoolBrodcast(t *testing.T) {
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err !=nil  {
+	if err := p.Call("", "", &response); err != nil {
 		t.Error("Got error: ", err)
 	}
 	/*time.Sleep(1 * time.Millisecond)
@@ -141,7 +141,7 @@ func TestPoolFirstPositive(t *testing.T) {
 			&MockRpcClient{id: "4"},
 		},
 	}
-	response=""
+	response = ""
 	p.Call("", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
