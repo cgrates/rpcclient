@@ -5,29 +5,30 @@ import (
 	"testing"
 )
 
-type MockRpcClient struct {
+type mockRPCClient struct {
 	id string
 }
 
-func (m *MockRpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	if m.id == "offline" {
+func (m *mockRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+	switch m.id {
+	case "offline":
 		return ErrReqUnsynchronized
-	}
-	if m.id == "error" {
+	case "error":
 		return errors.New("Not Found")
+	default:
+		*reply.(*string) += m.id
+		return nil
 	}
-	*reply.(*string) += m.id
-	return nil
 }
 
 func TestPoolFirst(t *testing.T) {
 	p := &RpcClientPool{
 		transmissionType: POOL_FIRST,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "1"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "1"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -38,10 +39,10 @@ func TestPoolFirst(t *testing.T) {
 	p = &RpcClientPool{
 		transmissionType: POOL_FIRST,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "offline"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "offline"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	p.Call("", "", &response)
@@ -54,10 +55,10 @@ func TestPoolNext(t *testing.T) {
 	p := &RpcClientPool{
 		transmissionType: POOL_NEXT,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "1"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "1"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -76,10 +77,10 @@ func TestPoolBrodcast(t *testing.T) {
 	p := &RpcClientPool{
 		transmissionType: POOL_BROADCAST,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "1"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "1"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -97,10 +98,10 @@ func TestPoolRANDOM(t *testing.T) {
 	p := &RpcClientPool{
 		transmissionType: POOL_RANDOM,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "1"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "1"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	m := make(map[string]struct{}, 4)
@@ -120,10 +121,10 @@ func TestPoolFirstPositive(t *testing.T) {
 	p := &RpcClientPool{
 		transmissionType: POOL_FIRST_POSITIVE,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "error"},
-			&MockRpcClient{id: "error"},
-			&MockRpcClient{id: "3"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "error"},
+			&mockRPCClient{id: "error"},
+			&mockRPCClient{id: "3"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -135,10 +136,10 @@ func TestPoolFirstPositive(t *testing.T) {
 	p = &RpcClientPool{
 		transmissionType: POOL_FIRST_POSITIVE,
 		connections: []RpcClientConnection{
-			&MockRpcClient{id: "error"},
-			&MockRpcClient{id: "2"},
-			&MockRpcClient{id: "error"},
-			&MockRpcClient{id: "4"},
+			&mockRPCClient{id: "error"},
+			&mockRPCClient{id: "2"},
+			&mockRPCClient{id: "error"},
+			&mockRPCClient{id: "4"},
 		},
 	}
 	response = ""
