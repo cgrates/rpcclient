@@ -320,7 +320,7 @@ func (client *RpcClient) Call(serviceMethod string, args interface{}, reply inte
 
 // RpcClientConnection is the connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
 type RpcClientConnection interface {
-	Call(string, interface{}, interface{}) error
+	Call(serviceMethod string, args interface{}, reply interface{}) (err error)
 }
 
 // RPCCloner is an interface for objects to clone parts of themselves which are affected by concurrency at the time of RPC call
@@ -498,4 +498,55 @@ func isNetworkError(err error) bool {
 		err == ErrReplyTimeout ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		strings.HasPrefix(err.Error(), "rpc: can't find service")
+}
+
+// RpcParallelClientPool implements RpcClientConnection
+type RpcParallelClientPool struct {
+	transport       string
+	tls             bool
+	address         string
+	keyPath         string
+	certPath        string
+	caPath          string
+	reconnects      int
+	connectAttempts int
+	connTimeout     time.Duration
+	replyTimeout    time.Duration
+	codec           string // JSON_RPC or GOB_RPC
+	internalChan    chan RpcClientConnection
+
+	connectionsChan chan RpcClientConnection
+	counterMux      sync.RWMutex
+	counter         int64
+	maxCounter      int64
+}
+
+// Call the method needed to implement RpcClientConnection
+func (pool *RpcParallelClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	var conn RpcClientConnection
+	select {
+	case conn = <-pool.connectionsChan:
+	default:
+		pool.counterMux.Lock()
+
+		if pool.counter >= pool.maxCounter {
+			pool.counterMux.Unlock()
+			conn = <-pool.connectionsChan
+		} else {
+			pool.counter++
+			pool.counterMux.Unlock()
+			if conn, err = NewRpcClient(pool.transport, pool.address, pool.tls,
+				pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
+				pool.connTimeout, pool.replyTimeout, pool.codec,
+				pool.internalChan, false); err != nil {
+				pool.counterMux.Lock()
+				pool.counter-- // remove the conter if the connection was never created
+				pool.counterMux.Unlock()
+				return
+			}
+		}
+	}
+	err = conn.Call(serviceMethod, args, reply)
+	pool.connectionsChan <- conn
+	return
 }
