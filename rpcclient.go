@@ -40,11 +40,16 @@ import (
 	"time"
 )
 
+// Constants to define the codec for RpcClient
 const (
-	JSON_RPC            = "json"
-	JSON_HTTP           = "http_jsonrpc"
-	GOB_RPC             = "gob"
-	INTERNAL_RPC        = "*internal"
+	JSON_RPC     = "json"
+	JSON_HTTP    = "http_jsonrpc"
+	GOB_RPC      = "gob"
+	INTERNAL_RPC = "*internal"
+)
+
+// Constants to define the strategy for RpcClientPool
+const (
 	POOL_FIRST          = "*first"
 	POOL_RANDOM         = "*random"
 	POOL_NEXT           = "*next"
@@ -52,6 +57,7 @@ const (
 	POOL_FIRST_POSITIVE = "*first_positive"
 )
 
+// Errors that library may return back
 var (
 	ErrReqUnsynchronized       = errors.New("REQ_UNSYNCHRONIZED")
 	ErrUnsupporteServiceMethod = errors.New("UNSUPPORTED_SERVICE_METHOD")
@@ -63,14 +69,14 @@ var (
 	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
 	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
 	ErrSessionNotFound         = errors.New("SESSION_NOT_FOUND")
-	logger                     *syslog.Writer
 )
+var logger *syslog.Writer
 
 func init() {
 	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
 }
 
-// successive Fibonacci numbers.
+// Fib returns successive Fibonacci numbers.
 func Fib() func() time.Duration {
 	a, b := 0, 1
 	return func() time.Duration {
@@ -79,29 +85,31 @@ func Fib() func() time.Duration {
 	}
 }
 
+// NewRpcClient creates a client based on the config
 func NewRpcClient(transport, addr string, tls bool,
-	key_path, cert_path, ca_path string, connectAttempts, reconnects int,
+	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalChan chan RpcClientConnection, lazyConnect bool) (rpcClient *RpcClient, err error) {
 	if codec != INTERNAL_RPC && codec != JSON_RPC && codec != JSON_HTTP && codec != GOB_RPC {
-		return nil, ErrUnsupportedCodec
+		err = ErrUnsupportedCodec
+		return
 	}
 	if codec == INTERNAL_RPC && reflect.ValueOf(internalChan).IsNil() {
-		return nil, ErrInternallyDisconnected
+		err = ErrInternallyDisconnected
+		return
 	}
 	rpcClient = &RpcClient{
 		transport:    transport,
 		tls:          tls,
 		address:      addr,
-		key_path:     key_path,
-		cert_path:    cert_path,
-		ca_path:      ca_path,
+		keyPath:      keyPath,
+		certPath:     certPath,
+		caPath:       caPath,
 		reconnects:   reconnects,
 		connTimeout:  connTimeout,
 		replyTimeout: replyTimeout,
 		codec:        codec,
 		internalChan: internalChan,
-		// connection: internalConn,
 	}
 	if lazyConnect {
 		return
@@ -114,16 +122,17 @@ func NewRpcClient(transport, addr string, tls bool,
 		}
 		time.Sleep(delay())
 	}
-	return rpcClient, err
+	return
 }
 
+// RpcClient implements RpcClientConnection
 type RpcClient struct {
 	transport    string
 	tls          bool
 	address      string
-	key_path     string
-	cert_path    string
-	ca_path      string
+	keyPath      string
+	certPath     string
+	caPath       string
 	reconnects   int
 	connTimeout  time.Duration
 	replyTimeout time.Duration
@@ -133,18 +142,18 @@ type RpcClient struct {
 	internalChan chan RpcClientConnection
 }
 
-func loadTLSConfig(clientCrt, clientKey, caPath string) (config tls.Config, err error) {
+func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err error) {
 	var cert tls.Certificate
 	if clientCrt != "" && clientKey != "" {
 		cert, err = tls.LoadX509KeyPair(clientCrt, clientKey)
 		if err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when load client cert and key", err))
-			return config, err
+			return
 		}
 	}
 
-	rootCAs, err := x509.SystemCertPool()
-	if err != nil {
+	var rootCAs *x509.CertPool
+	if rootCAs, err = x509.SystemCertPool(); err != nil {
 		logger.Crit(fmt.Sprintf("Error: %s when load SystemCertPool", err))
 		return
 	}
@@ -153,132 +162,126 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config tls.Config, err 
 	}
 
 	if caPath != "" {
-		ca, err := ioutil.ReadFile(caPath)
-		if err != nil {
+		var ca []byte
+		if ca, err = ioutil.ReadFile(caPath); err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when read CA", err))
-			return config, err
+			return
 		}
 
 		if ok := rootCAs.AppendCertsFromPEM(ca); !ok {
 			logger.Crit(fmt.Sprintf("Cannot append certificate authority"))
-			return config, err
+			return
 		}
 	}
 
-	config = tls.Config{
+	config = &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      rootCAs,
 	}
 	return
 }
 
-func (self *RpcClient) connect() (err error) {
-	self.connMux.Lock()
-	defer self.connMux.Unlock()
-	if self.codec == INTERNAL_RPC {
-		if self.connection == nil {
+func (client *RpcClient) connect() (err error) {
+	client.connMux.Lock()
+	defer client.connMux.Unlock()
+	if client.codec == INTERNAL_RPC {
+		if client.connection == nil {
 			select {
-			case self.connection = <-self.internalChan:
-				self.internalChan <- self.connection
-				if self.connection == nil {
+			case client.connection = <-client.internalChan:
+				client.internalChan <- client.connection
+				if client.connection == nil {
 					return ErrDisconnected
 				}
-			case <-time.After(self.connTimeout):
+			case <-time.After(client.connTimeout):
 				return ErrDisconnected
 			}
 		}
 		return
-	} else if self.codec == JSON_HTTP {
-		if self.tls {
-			config, err := loadTLSConfig(self.cert_path, self.key_path, self.ca_path)
-			if err != nil {
-				return err
+	} else if client.codec == JSON_HTTP {
+		if client.tls {
+			var config *tls.Config
+			if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
+				return
 			}
-			transport := &http.Transport{TLSClientConfig: &config}
-			client := &http.Client{Transport: transport}
-			self.connection = &HttpJsonRpcClient{httpClient: client, url: self.address}
+			transport := &http.Transport{TLSClientConfig: config}
+			httpClient := &http.Client{Transport: transport}
+			client.connection = &HttpJsonRpcClient{httpClient: httpClient, url: client.address}
 		} else {
-			self.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: self.address}
+			client.connection = &HttpJsonRpcClient{httpClient: new(http.Client), url: client.address}
 		}
 		return
 	}
 	var netconn io.ReadWriteCloser
-	if self.tls {
-		config, err := loadTLSConfig(self.cert_path, self.key_path, self.ca_path)
-		if err != nil {
-			return err
+	if client.tls {
+		var config *tls.Config
+		if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
+			return
 		}
-		netconn, err = tls.Dial(self.transport, self.address, &config)
-		if err != nil {
+		if netconn, err = tls.Dial(client.transport, client.address, config); err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when dialing", err.Error()))
-			return err
+			return
 		}
 	} else {
 		// RPC compliant connections here, manually create connection to timeout
-		netconn, err = net.DialTimeout(self.transport, self.address, self.connTimeout)
-		if err != nil {
-			self.connection = nil // So we don't wrap nil into the interface
-			return err
+		if netconn, err = net.DialTimeout(client.transport, client.address, client.connTimeout); err != nil {
+			client.connection = nil // So we don't wrap nil into the interface
+			return
 		}
 	}
 
-	if self.codec == JSON_RPC {
-		self.connection = jsonrpc.NewClient(netconn)
+	if client.codec == JSON_RPC {
+		client.connection = jsonrpc.NewClient(netconn)
 	} else {
-		self.connection = rpc.NewClient(netconn)
+		client.connection = rpc.NewClient(netconn)
 	}
 	return
 }
 
-func (self *RpcClient) isConnected() bool {
-	self.connMux.RLock()
-	defer self.connMux.RUnlock()
-	return self.connection != nil
+func (client *RpcClient) isConnected() bool {
+	client.connMux.RLock()
+	defer client.connMux.RUnlock()
+	return client.connection != nil
 }
 
-func (self *RpcClient) disconnect() (err error) {
-	switch self.codec {
+func (client *RpcClient) disconnect() (err error) {
+	switch client.codec {
 	case INTERNAL_RPC, JSON_HTTP:
 	default:
-		self.connMux.Lock()
-		if self.connection != nil {
-			self.connection.(*rpc.Client).Close()
-			self.connection = nil
+		client.connMux.Lock()
+		if client.connection != nil {
+			client.connection.(*rpc.Client).Close()
+			client.connection = nil
 		}
-		self.connMux.Unlock()
+		client.connMux.Unlock()
 	}
-	return nil
+	return
 }
 
-func (self *RpcClient) reconnect() (err error) {
-	self.disconnect()            // make sure we have cleared the connection so it can be garbage collected
-	if self.codec == JSON_HTTP { // http client has automatic reconnects in place
-		return self.connect()
+func (client *RpcClient) reconnect() (err error) {
+	client.disconnect()            // make sure we have cleared the connection so it can be garbage collected
+	if client.codec == JSON_HTTP { // http client has automatic reconnects in place
+		return client.connect()
 	}
-	i := 0
 	delay := Fib()
-	for {
-		i++
-		if self.reconnects != -1 && i > self.reconnects { // Maximum reconnects reached, -1 for infinite reconnects
-			break
+	for i := 1; client.reconnects != -1 && i > client.reconnects; i++ { // Maximum reconnects reached, -1 for infinite reconnects
+		if err = client.connect(); err != nil { // No error on connect, succcess
+			time.Sleep(delay()) // Cound not reconnect, retry
+			continue
 		}
-		if err = self.connect(); err == nil { // No error on connect, succcess
-			return nil
-		}
-		time.Sleep(delay()) // Cound not reconnect, retry
+		return
 	}
 	return ErrFailedReconnect
 }
 
-func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *RpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
 	if args == nil {
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
 	rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface() // clone to avoid concurrency
 	errChan := make(chan error, 1)
 	go func(serviceMethod string, args interface{}, reply interface{}) {
-		self.connMux.RLock()
-		if self.connection == nil {
+		client.connMux.RLock()
+		if client.connection == nil {
 			errChan <- ErrDisconnected
 		} else {
 			if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
@@ -289,33 +292,33 @@ func (self *RpcClient) Call(serviceMethod string, args interface{}, reply interf
 					args = argsCloned
 				}
 			}
-			errChan <- self.connection.Call(serviceMethod, args, reply)
+			errChan <- client.connection.Call(serviceMethod, args, reply)
 		}
-		self.connMux.RUnlock()
+		client.connMux.RUnlock()
 	}(serviceMethod, args, rpl)
 	select {
 	case err = <-errChan:
-	case <-time.After(self.replyTimeout):
+	case <-time.After(client.replyTimeout):
 		err = ErrReplyTimeout
 	}
 	if isNetworkError(err) && err != ErrReplyTimeout &&
 		err.Error() != ErrSessionNotFound.Error() &&
-		self.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
-		if errReconnect := self.reconnect(); errReconnect != nil {
-			return err
+		client.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
+		if errReconnect := client.reconnect(); errReconnect != nil {
+			return
 		}
-		self.connMux.RLock()
-		defer self.connMux.RUnlock()
-		if self.connection == nil {
+		client.connMux.RLock()
+		defer client.connMux.RUnlock()
+		if client.connection == nil {
 			return ErrDisconnected
 		}
-		return self.connection.Call(serviceMethod, args, reply)
+		return client.connection.Call(serviceMethod, args, reply)
 	}
 	reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem()) // no errors, copy the reply from clone
 	return
 }
 
-// Connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
+// RpcClientConnection is the connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
 type RpcClientConnection interface {
 	Call(string, interface{}, interface{}) error
 }
@@ -338,29 +341,29 @@ type HttpJsonRpcClient struct {
 	url        string
 }
 
-func (self *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
-	self.id += 1
-	id := self.id
-	data, err := json.Marshal(map[string]interface{}{
+func (client *HttpJsonRpcClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+	client.id++
+	id := client.id
+	var data []byte
+	if data, err = json.Marshal(map[string]interface{}{
 		"method": serviceMethod,
-		"id":     self.id,
+		"id":     client.id,
 		"params": [1]interface{}{args},
-	})
-	if err != nil {
-		return err
+	}); err != nil {
+		return
 	}
-	resp, err := self.httpClient.Post(self.url, "application/json", ioutil.NopCloser(strings.NewReader(string(data)))) // Closer so we automatically have close after response
-	if err != nil {
-		return err
+	var resp *http.Response
+	if resp, err = client.httpClient.Post(client.url, "application/json",
+		ioutil.NopCloser(strings.NewReader(string(data)))); err != nil { // Closer so we automatically have close after response
+		return
 	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
+		return
 	}
 	var jsonRsp JsonRpcResponse
-	err = json.Unmarshal(body, &jsonRsp)
-	if err != nil {
-		return err
+	if err = json.Unmarshal(body, &jsonRsp); err != nil {
+		return
 	}
 	if jsonRsp.Id != id {
 		return ErrReqUnsynchronized
@@ -467,11 +470,11 @@ type rpcReplyError struct {
 
 // generates round robin indexes for a slice of length max
 // starting from index start
-func roundIndex(start, max int) []int {
+func roundIndex(start, max int) (result []int) {
 	if start < 0 {
 		start = 0
 	}
-	result := make([]int, max)
+	result = make([]int, max)
 	for i := 0; i < max; i++ {
 		if start+i < max {
 			result[i] = start + i
@@ -479,7 +482,7 @@ func roundIndex(start, max int) []int {
 			result[i] = int(math.Abs(float64(max - (start + i))))
 		}
 	}
-	return result
+	return
 }
 
 func isNetworkError(err error) bool {
