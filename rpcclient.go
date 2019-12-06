@@ -197,7 +197,8 @@ func (client *RPCClient) connect() (err error) {
 			}
 		}
 		return
-	} else if client.codec == HTTPjson {
+	}
+	if client.codec == HTTPjson {
 		if client.tls {
 			var config *tls.Config
 			if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
@@ -263,7 +264,7 @@ func (client *RPCClient) reconnect() (err error) {
 		return client.connect()
 	}
 	delay := Fib()
-	for i := 1; client.reconnects != -1 && i > client.reconnects; i++ { // Maximum reconnects reached, -1 for infinite reconnects
+	for i := 1; client.reconnects == -1 || i <= client.reconnects; i++ { // Maximum reconnects reached, -1 for infinite reconnects
 		if err = client.connect(); err != nil { // No error on connect, succcess
 			time.Sleep(delay()) // Cound not reconnect, retry
 			continue
@@ -275,7 +276,7 @@ func (client *RPCClient) reconnect() (err error) {
 
 // Call the method needed to implement ClientConnector
 func (client *RPCClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
-	if args == nil {
+	if args == nil || reply == nil || reflect.ValueOf(reply).IsNil() { // panics  on zero Value if not checked
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
 	rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface() // clone to avoid concurrency
@@ -310,9 +311,6 @@ func (client *RPCClient) Call(serviceMethod string, args interface{}, reply inte
 		}
 		client.connMux.RLock()
 		defer client.connMux.RUnlock()
-		if client.connection == nil {
-			return ErrDisconnected
-		}
 		return client.connection.Call(serviceMethod, args, reply)
 	}
 	reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem()) // no errors, copy the reply from clone
@@ -596,7 +594,7 @@ func (pool *RPCParallelClientPool) Call(serviceMethod string, args interface{}, 
 }
 
 func (pool *RPCParallelClientPool) initConns() (err error) {
-	for pool.counter = 0; pool.counter <= int64(cap(pool.connectionsChan)); pool.counter++ {
+	for pool.counter = 0; pool.counter < int64(cap(pool.connectionsChan)); pool.counter++ {
 		var conn ClientConnector
 		if conn, err = NewRPCClient(pool.transport, pool.address, pool.tls,
 			pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
