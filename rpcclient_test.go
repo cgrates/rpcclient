@@ -12,11 +12,16 @@ import (
 	"time"
 )
 
-type mockRPCClient struct {
+type MockRPCClient struct {
 	id string
 }
 
-func (m *mockRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (m *MockRPCClient) Echo(args string, reply *string) error {
+	*reply += m.id
+	return nil
+}
+
+func (m *MockRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
 	switch m.id {
 	case "offline":
 		return ErrReqUnsynchronized
@@ -37,10 +42,10 @@ func TestPoolFirst(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolFirst,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -51,10 +56,10 @@ func TestPoolFirst(t *testing.T) {
 	p = &RPCPool{
 		transmissionType: PoolFirst,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "offline"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "offline"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	p.Call("", "", &response)
@@ -67,10 +72,10 @@ func TestPoolNext(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolNext,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -87,11 +92,11 @@ func TestPoolNext(t *testing.T) {
 	p = &RPCPool{
 		transmissionType: PoolNext,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "nerr"},
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "nerr"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	response = ""
@@ -105,10 +110,10 @@ func TestPoolBrodcast(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolBroadcast,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -131,11 +136,11 @@ func TestPoolRANDOM(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolRandom,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "nerr"},
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "nerr"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	m := make(map[string]struct{}, 4)
@@ -155,10 +160,10 @@ func TestWrongPool(t *testing.T) { // in case of a unknow pool we do nothing at 
 	p := &RPCPool{
 		transmissionType: "Not a supported pool",
 		connections: []ClientConnector{
-			&mockRPCClient{id: "1"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -174,10 +179,10 @@ func TestPoolFirstPositive(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolFirstPositive,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "error"},
-			&mockRPCClient{id: "error"},
-			&mockRPCClient{id: "3"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	var response string
@@ -189,10 +194,10 @@ func TestPoolFirstPositive(t *testing.T) {
 	p = &RPCPool{
 		transmissionType: PoolFirstPositive,
 		connections: []ClientConnector{
-			&mockRPCClient{id: "error"},
-			&mockRPCClient{id: "2"},
-			&mockRPCClient{id: "error"},
-			&mockRPCClient{id: "4"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "4"},
 		},
 	}
 	response = ""
@@ -204,7 +209,7 @@ func TestPoolFirstPositive(t *testing.T) {
 
 func TestNewRpcParallelClientPool(t *testing.T) {
 	internalChan := make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "1"}
+	internalChan <- &MockRPCClient{id: "1"}
 	rpcppool, err := NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 2, false)
 	if err != nil {
@@ -254,7 +259,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 
 	close(internalChan)
 	internalChan = make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "sleep"}
+	internalChan <- &MockRPCClient{id: "sleep"}
 	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
 		time.Millisecond, 70*time.Millisecond, InternalRPC, internalChan, 2, false)
 	if err != nil {
@@ -277,7 +282,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 	group.Wait()
 
 	internalChan = make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "1"}
+	internalChan <- &MockRPCClient{id: "1"}
 	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 3, true)
 	if err != nil {
@@ -341,7 +346,7 @@ func TestNewRPCPool(t *testing.T) {
 		t.Errorf("Expected: %v received: %v", exp, pool)
 	}
 	internalChan := make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "1"}
+	internalChan <- &MockRPCClient{id: "1"}
 	client, err := NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 2, false)
 	if err != nil {
@@ -386,7 +391,7 @@ func TestNewRPCClient(t *testing.T) {
 	}
 
 	internalChan := make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "1"}
+	internalChan <- &MockRPCClient{id: "1"}
 	exp := &RPCClient{
 		transport:    "transport",
 		tls:          false,
@@ -515,7 +520,7 @@ func (c cloner) RPCClone() (interface{}, error) {
 }
 func TestRPCClientCall(t *testing.T) {
 	internalChan := make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "1"}
+	internalChan <- &MockRPCClient{id: "1"}
 	client, err := NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
 		10*time.Millisecond, 5*time.Millisecond, InternalRPC, internalChan, true)
 	if err != nil {
@@ -558,7 +563,7 @@ func TestRPCClientCall(t *testing.T) {
 		t.Errorf("Expected error: %s received: %v", ErrDisconnected, err)
 	}
 	internalChan = make(chan ClientConnector, 1)
-	internalChan <- &mockRPCClient{id: "sleep"}
+	internalChan <- &MockRPCClient{id: "sleep"}
 	client, err = NewRPCClient("transport", "addr", false, "", "", "", 1, 1,
 		10*time.Millisecond, 5*time.Millisecond, InternalRPC, internalChan, false)
 	if err != nil {
