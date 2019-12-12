@@ -303,7 +303,7 @@ func (client *RPCClient) Call(serviceMethod string, args interface{}, reply inte
 	case <-time.After(client.replyTimeout):
 		err = ErrReplyTimeout
 	}
-	if isNetworkError(err) && err != ErrReplyTimeout &&
+	if IsNetworkError(err) && err != ErrReplyTimeout &&
 		err.Error() != ErrSessionNotFound.Error() &&
 		client.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
 		if errReconnect := client.reconnect(); errReconnect != nil {
@@ -415,7 +415,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 				err := conn.Call(serviceMethod, args, rpl.Interface())
-				if !isNetworkError(err) {
+				if !IsNetworkError(err) {
 					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
 				}
 			}(rc)
@@ -433,7 +433,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 	case PoolFirst:
 		for _, rc := range pool.connections {
 			err = rc.Call(serviceMethod, args, reply)
-			if isNetworkError(err) {
+			if IsNetworkError(err) {
 				continue
 			}
 			return
@@ -444,7 +444,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		pool.counter++
 		for _, index := range rrIndexes {
 			err = pool.connections[index].Call(serviceMethod, args, reply)
-			if isNetworkError(err) {
+			if IsNetworkError(err) {
 				continue
 			}
 			return
@@ -454,7 +454,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		randomIndex := rand.Perm(len(pool.connections))
 		for _, index := range randomIndex {
 			err = pool.connections[index].Call(serviceMethod, args, reply)
-			if isNetworkError(err) {
+			if IsNetworkError(err) {
 				continue
 			}
 			return
@@ -493,7 +493,7 @@ func roundIndex(start, max int) (result []int) {
 	return
 }
 
-func isNetworkError(err error) bool {
+func IsNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
