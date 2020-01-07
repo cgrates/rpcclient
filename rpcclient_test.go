@@ -132,6 +132,59 @@ func TestPoolBrodcast(t *testing.T) {
 	}
 }
 
+func TestPoolBrodcastSyncWithError(t *testing.T) {
+	p := &RPCPool{
+		transmissionType: PoolBroadcastSync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "2"},
+		},
+	}
+	var response string
+	if err := p.Call("", "", &response); err != ErrPartiallyExecuted {
+		t.Errorf("Expected error %s received:%v ", ErrPartiallyExecuted, err)
+	}
+	if len(response) != 1 {
+		t.Error("Error calling client: ", response)
+	}
+
+	p = &RPCPool{
+		transmissionType: PoolBroadcastSync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "error"},
+			&MockRPCClient{id: "error"},
+		},
+	}
+	var response2 string
+	if err := p.Call("", "", &response2); err != ErrPartiallyExecuted {
+		t.Errorf("Expected error %s received:%v ", ErrPartiallyExecuted, err)
+	}
+	if len(response2) != 0 {
+		t.Error("Error calling client: ", response2)
+	}
+}
+
+func TestPoolBrodcastSyncWithoutError(t *testing.T) {
+	p := &RPCPool{
+		transmissionType: PoolBroadcastSync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+		},
+	}
+	var response string
+	if err := p.Call("", "", &response); err != nil {
+		t.Error("Got error: ", err)
+	}
+	if len(response) != 1 {
+		t.Error("Error calling client: ", response)
+	}
+}
+
 func TestPoolRANDOM(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolRandom,
