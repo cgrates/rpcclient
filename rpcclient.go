@@ -56,6 +56,7 @@ const (
 	PoolBroadcast     = "*broadcast"
 	PoolFirstPositive = "*first_positive"
 	PoolParallel      = "*parallel"
+	PoolBroadcastSync = "*broadcast_sync"
 )
 
 // Errors that library may return back
@@ -70,6 +71,7 @@ var (
 	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
 	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
 	ErrSessionNotFound         = errors.New("SESSION_NOT_FOUND")
+	ErrPartiallyExecuted       = errors.New("PARTIALLY_EXECUTED")
 )
 var logger *syslog.Writer
 
@@ -466,6 +468,29 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			if err == nil {
 				break
 			}
+		}
+		return
+	case PoolBroadcastSync:
+		var wg sync.WaitGroup
+		withErrors := false
+		for _, rc := range pool.connections {
+			wg.Add(1)
+			go func(conn ClientConnector) {
+				// make a new pointer of the same type
+				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
+				err := conn.Call(serviceMethod, args, rpl.Interface())
+				if err != nil && !IsNetworkError(err) {
+					logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
+					withErrors = true
+				} else if err == nil {
+					reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl.Interface()).Elem())
+				}
+				wg.Done()
+			}(rc)
+		}
+		wg.Wait() // wait for synchronous replication to finish
+		if withErrors {
+			return ErrPartiallyExecuted
 		}
 		return
 	}
