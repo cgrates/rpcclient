@@ -55,6 +55,7 @@ const (
 	PoolNext          = "*next"
 	PoolBroadcast     = "*broadcast"
 	PoolFirstPositive = "*first_positive"
+	PoolParallel      = "*parallel"
 )
 
 // Errors that library may return back
