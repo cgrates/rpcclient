@@ -478,7 +478,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
-				err := conn.Call(serviceMethod, args, rpl.Interface())
+				err = conn.Call(serviceMethod, args, rpl.Interface())
 				if err != nil && !IsNetworkError(err) {
 					logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
 					withErrors = true
