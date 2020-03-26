@@ -472,27 +472,40 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		return
 	case PoolBroadcastSync:
 		var wg sync.WaitGroup
-		withErrors := false
+
+		errChan := make(chan error, len(pool.connections))
 		for _, rc := range pool.connections {
 			wg.Add(1)
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
-				err = conn.Call(serviceMethod, args, rpl.Interface())
-				if err != nil && !IsNetworkError(err) {
-					logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
-					withErrors = true
-				} else if err == nil {
+				err := conn.Call(serviceMethod, args, rpl.Interface())
+				if err != nil {
+					errChan <- err
+				} else {
 					reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl.Interface()).Elem())
 				}
 				wg.Done()
 			}(rc)
 		}
 		wg.Wait() // wait for synchronous replication to finish
-		if withErrors {
-			return ErrPartiallyExecuted
+		var hasErr bool
+		for exit := false; !exit; {
+			select {
+			case chanErr := <-errChan:
+				if !IsNetworkError(chanErr) {
+					logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
+					hasErr = true
+				} else {
+					err = chanErr
+				}
+			default:
+				exit = true
+			}
 		}
-		return
+		if err == nil && hasErr {
+			err = ErrPartiallyExecuted
+		}
 	}
 	return
 }
