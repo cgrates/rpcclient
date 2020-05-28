@@ -36,7 +36,6 @@ import (
 	"reflect"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -536,7 +535,10 @@ func IsNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if operr, ok := err.(*net.OpError); ok && strings.HasSuffix(operr.Err.Error(), syscall.ECONNRESET.Error()) { // connection reset
+	if _, isNetError := err.(*net.OpError); isNetError {
+		return true
+	}
+	if _, isDNSError := err.(*net.DNSError); isDNSError {
 		return true
 	}
 	return err == rpc.ErrShutdown ||
