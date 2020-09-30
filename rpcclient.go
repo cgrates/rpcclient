@@ -281,41 +281,42 @@ func (client *RPCClient) Call(serviceMethod string, args interface{}, reply inte
 	if args == nil || reply == nil || reflect.ValueOf(reply).IsNil() { // panics  on zero Value if not checked
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
-	rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface())).Interface() // clone to avoid concurrency
 	errChan := make(chan error, 1)
-	go func(serviceMethod string, args interface{}, reply interface{}) {
-		client.connMux.RLock()
-		if client.connection == nil {
-			errChan <- ErrDisconnected
-		} else {
-			if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
-				var argsCloned interface{}
-				if argsCloned, err = argsClnIface.RPCClone(); err != nil {
-					errChan <- err
-					return
-				}
-				args = argsCloned
+	if client.codec == InternalRPC { // only try to clone on *internal for the rest the arguments are marshaled so no clone needed
+		if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
+			if args, err = argsClnIface.RPCClone(); err != nil {
+				return
 			}
-			errChan <- client.connection.Call(serviceMethod, args, reply)
 		}
-		client.connMux.RUnlock()
-	}(serviceMethod, args, rpl)
-	select {
-	case err = <-errChan:
-	case <-time.After(client.replyTimeout):
-		err = ErrReplyTimeout
 	}
-	if IsNetworkError(err) && err != ErrReplyTimeout &&
-		err.Error() != ErrSessionNotFound.Error() &&
-		client.reconnects != 0 { // ReplyTimeout should not reconnect since it creates loop
-		if errReconnect := client.reconnect(); errReconnect != nil {
+	timeOut := time.After(client.replyTimeout)
+	var errReconnect error
+	for ; errReconnect == nil; errReconnect = client.reconnect() {
+		go client.call(serviceMethod, args, reply, errChan)
+		select {
+		case err = <-errChan:
+			if !IsNetworkError(err) ||
+				err.Error() == ErrSessionNotFound.Error() ||
+				client.reconnects == 0 {
+				return
+			}
+		case <-timeOut:
+			err = ErrReplyTimeout
 			return
 		}
-		client.connMux.RLock()
-		defer client.connMux.RUnlock()
-		return client.connection.Call(serviceMethod, args, reply)
 	}
-	reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rpl).Elem()) // no errors, copy the reply from clone
+
+	return
+}
+
+func (client *RPCClient) call(serviceMethod string, args interface{}, reply interface{}, errChan chan error) {
+	client.connMux.RLock()
+	if client.connection == nil {
+		errChan <- ErrDisconnected
+	} else {
+		errChan <- client.connection.Call(serviceMethod, args, reply)
+	}
+	client.connMux.RUnlock()
 	return
 }
 

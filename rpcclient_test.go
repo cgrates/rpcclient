@@ -108,6 +108,7 @@ func TestPoolNext(t *testing.T) {
 
 func TestPoolBrodcast(t *testing.T) {
 	p := &RPCPool{
+		replyTimeout:     time.Second,
 		transmissionType: PoolBroadcast,
 		connections: []ClientConnector{
 			&MockRPCClient{id: "1"},
