@@ -310,6 +310,7 @@ func (client *RPCClient) Call(serviceMethod string, args interface{}, reply inte
 	go client.call(serviceMethod, args, reply, errChan)
 	select {
 	case err = <-errChan:
+		timeOut.Stop()
 	case <-timeOut.C:
 		err = ErrReplyTimeout
 		return

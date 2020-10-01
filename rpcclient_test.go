@@ -627,3 +627,17 @@ func TestRPCClientCall(t *testing.T) {
 		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
 	}
 }
+
+func TestRPCClientCallTimeout(t *testing.T) {
+	internalChan := make(chan ClientConnector, 1)
+	internalChan <- &MockRPCClient{id: "sleep"}
+	cl, err := NewRPCClient("", "", false, "", "", "", 1, 1,
+		time.Millisecond, 25*time.Millisecond, InternalRPC, internalChan, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reply string
+	if err = cl.Call("", "", &reply); err != ErrReplyTimeout {
+		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
+	}
+}
