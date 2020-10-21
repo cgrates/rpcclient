@@ -68,6 +68,37 @@ func TestPoolFirst(t *testing.T) {
 	}
 }
 
+func TestPoolFirstAsync(t *testing.T) {
+	p := &RPCPool{
+		transmissionType: PoolFirstAsync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "1"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
+		},
+	}
+	var response string
+	// we don't verify the response because the connection is asynchronous
+	if err := p.Call("", "", &response); err != nil {
+		return
+	}
+
+	p = &RPCPool{
+		transmissionType: PoolFirstAsync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "offline"},
+			&MockRPCClient{id: "2"},
+			&MockRPCClient{id: "3"},
+			&MockRPCClient{id: "4"},
+		},
+	}
+	if err := p.Call("", "", &response); err != nil {
+		return
+	}
+
+}
+
 func TestPoolNext(t *testing.T) {
 	p := &RPCPool{
 		transmissionType: PoolNext,
