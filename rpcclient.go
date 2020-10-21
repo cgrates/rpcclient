@@ -50,6 +50,7 @@ const (
 // Constants to define the strategy for RpcClientPool
 const (
 	PoolFirst         = "*first"
+	PoolFirstAsync    = "*first_async"
 	PoolRandom        = "*random"
 	PoolNext          = "*next"
 	PoolBroadcast     = "*broadcast"
@@ -450,6 +451,18 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			}
 			return
 		}
+	case PoolFirstAsync:
+		// because the call is async we need to copy the reply to avoid overwrite
+		rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
+		go func() {
+			for _, rc := range pool.connections {
+				err := rc.Call(serviceMethod, args, rpl.Interface())
+				if IsNetworkError(err) {
+					continue
+				}
+				return
+			}
+		}()
 	case PoolNext:
 		ln := len(pool.connections)
 		rrIndexes := roundIndex(int(math.Mod(float64(pool.counter), float64(ln))), ln)
