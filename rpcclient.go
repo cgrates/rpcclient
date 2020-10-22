@@ -452,9 +452,9 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			return
 		}
 	case PoolAsync:
-		// because the call is async we need to copy the reply to avoid overwrite
-		rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 		go func() {
+			// because the call is async we need to copy the reply to avoid overwrite
+			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 			for _, rc := range pool.connections {
 				err := rc.Call(serviceMethod, args, rpl.Interface())
 				if IsNetworkError(err) {
