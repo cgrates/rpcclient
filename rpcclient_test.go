@@ -70,7 +70,7 @@ func TestPoolFirst(t *testing.T) {
 
 func TestPoolFirstAsync(t *testing.T) {
 	p := &RPCPool{
-		transmissionType: PoolFirstAsync,
+		transmissionType: PoolAsync,
 		connections: []ClientConnector{
 			&MockRPCClient{id: "1"},
 			&MockRPCClient{id: "2"},
@@ -85,7 +85,7 @@ func TestPoolFirstAsync(t *testing.T) {
 	}
 
 	p = &RPCPool{
-		transmissionType: PoolFirstAsync,
+		transmissionType: PoolAsync,
 		connections: []ClientConnector{
 			&MockRPCClient{id: "offline"},
 			&MockRPCClient{id: "2"},
