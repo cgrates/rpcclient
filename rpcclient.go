@@ -50,7 +50,7 @@ const (
 // Constants to define the strategy for RpcClientPool
 const (
 	PoolFirst         = "*first"
-	PoolFirstAsync    = "*first_async"
+	PoolAsync         = "*async"
 	PoolRandom        = "*random"
 	PoolNext          = "*next"
 	PoolBroadcast     = "*broadcast"
@@ -451,7 +451,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			}
 			return
 		}
-	case PoolFirstAsync:
+	case PoolAsync:
 		// because the call is async we need to copy the reply to avoid overwrite
 		rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 		go func() {
