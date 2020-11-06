@@ -34,10 +34,8 @@ func (m *MockRPCClient) Call(serviceMethod string, args interface{}, reply inter
 		return rpc.ErrShutdown
 	case "async":
 		m.used = true
-		select {
-		case <-time.After(50 * time.Millisecond):
-		case <-m.c:
-		}
+		time.Sleep(20 * time.Millisecond)
+		close(m.c)
 		return rpc.ErrShutdown
 	case "sleep":
 		time.Sleep(50 * time.Millisecond)
@@ -735,7 +733,7 @@ func TestRPCPoolBroadcastAsync(t *testing.T) {
 	}
 	for _, i := range c {
 		runtime.Gosched()
-		close(i.c)
+		<-i.c // wait for the call goroutine to end
 		if !i.used {
 			t.Fatalf("Expected all connection to be called")
 		}
