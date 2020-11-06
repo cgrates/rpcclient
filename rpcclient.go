@@ -19,6 +19,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>
 package rpcclient
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -49,14 +50,15 @@ const (
 
 // Constants to define the strategy for RpcClientPool
 const (
-	PoolFirst         = "*first"
-	PoolAsync         = "*async"
-	PoolRandom        = "*random"
-	PoolNext          = "*next"
-	PoolBroadcast     = "*broadcast"
-	PoolFirstPositive = "*first_positive"
-	PoolParallel      = "*parallel"
-	PoolBroadcastSync = "*broadcast_sync"
+	PoolFirst          = "*first"
+	PoolAsync          = "*async"
+	PoolRandom         = "*random"
+	PoolNext           = "*next"
+	PoolBroadcast      = "*broadcast"
+	PoolFirstPositive  = "*first_positive"
+	PoolParallel       = "*parallel"
+	PoolBroadcastSync  = "*broadcast_sync"
+	PoolBroadcastAsync = "*broadcast_async"
 )
 
 // Errors that library may return back
@@ -368,15 +370,12 @@ func (client *HTTPjsonRPCClient) Call(serviceMethod string, args interface{}, re
 	}
 	var resp *http.Response
 	if resp, err = client.httpClient.Post(client.url, "application/json",
-		ioutil.NopCloser(strings.NewReader(string(data)))); err != nil { // Closer so we automatically have close after response
+		ioutil.NopCloser(bytes.NewBuffer(data))); err != nil {
 		return
 	}
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return
-	}
+	defer resp.Body.Close()
 	var jsonRsp JSONrpcResponse
-	if err = json.Unmarshal(body, &jsonRsp); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&jsonRsp); err != nil {
 		return
 	}
 	if jsonRsp.ID != id {
@@ -443,6 +442,15 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		// put received value in the orig reply
 		reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(re.reply).Elem())
 		return re.err
+	case PoolBroadcastAsync:
+		for _, rc := range pool.connections {
+			go func(conn ClientConnector) {
+				// make a new pointer of the same type
+				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
+				conn.Call(serviceMethod, args, rpl.Interface())
+			}(rc)
+		}
+		return nil
 	case PoolFirst:
 		for _, rc := range pool.connections {
 			err = rc.Call(serviceMethod, args, reply)
@@ -494,7 +502,6 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		return
 	case PoolBroadcastSync:
 		var wg sync.WaitGroup
-
 		errChan := make(chan error, len(pool.connections))
 		for _, rc := range pool.connections {
 			wg.Add(1)
@@ -511,18 +518,14 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			}(rc)
 		}
 		wg.Wait() // wait for synchronous replication to finish
+		close(errChan)
 		var hasErr bool
-		for exit := false; !exit; {
-			select {
-			case chanErr := <-errChan:
-				if !IsNetworkError(chanErr) {
-					logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
-					hasErr = true
-				} else {
-					err = chanErr
-				}
-			default:
-				exit = true
+		for chanErr := range errChan {
+			if !IsNetworkError(chanErr) {
+				logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
+				hasErr = true
+			} else {
+				err = chanErr
 			}
 		}
 		if err == nil && hasErr {

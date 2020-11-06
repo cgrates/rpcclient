@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/rpc"
 	"reflect"
+	"runtime"
 	"sync"
 	"syscall"
 	"testing"
@@ -13,7 +14,9 @@ import (
 )
 
 type MockRPCClient struct {
-	id string
+	id   string
+	c    chan struct{}
+	used bool
 }
 
 func (m *MockRPCClient) Echo(args string, reply *string) error {
@@ -28,6 +31,13 @@ func (m *MockRPCClient) Call(serviceMethod string, args interface{}, reply inter
 	case "error":
 		return errors.New("Not Found")
 	case "nerr":
+		return rpc.ErrShutdown
+	case "async":
+		m.used = true
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-m.c:
+		}
 		return rpc.ErrShutdown
 	case "sleep":
 		time.Sleep(50 * time.Millisecond)
@@ -197,6 +207,22 @@ func TestPoolBrodcastSyncWithError(t *testing.T) {
 	if len(response2) != 0 {
 		t.Error("Error calling client: ", response2)
 	}
+
+	p = &RPCPool{
+		transmissionType: PoolBroadcastSync,
+		connections: []ClientConnector{
+			&MockRPCClient{id: "nerr"},
+			&MockRPCClient{id: "nerr"},
+			&MockRPCClient{id: "nerr"},
+		},
+	}
+	if err := p.Call("", "", &response2); err != rpc.ErrShutdown {
+		t.Errorf("Expected error %s received:%v ", rpc.ErrShutdown, err)
+	}
+	if len(response2) != 0 {
+		t.Error("Error calling client: ", response2)
+	}
+
 }
 
 func TestPoolBrodcastSyncWithoutError(t *testing.T) {
@@ -403,6 +429,10 @@ func TestIsNetworkError(t *testing.T) {
 		t.Errorf("%s error should not be consider a network error", err)
 	}
 	err = ErrDisconnected
+	if !IsNetworkError(err) {
+		t.Errorf("%s error should be consider a network error", err)
+	}
+	err = new(net.DNSError)
 	if !IsNetworkError(err) {
 		t.Errorf("%s error should be consider a network error", err)
 	}
@@ -671,4 +701,44 @@ func TestRPCClientCallTimeout(t *testing.T) {
 	if err = cl.Call("", "", &reply); err != ErrReplyTimeout {
 		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
 	}
+}
+
+func TestRPCPoolBroadcastAsync(t *testing.T) {
+	c := []*MockRPCClient{
+		{id: "async", c: make(chan struct{}, 1)},
+		{id: "async", c: make(chan struct{}, 1)},
+		{id: "async", c: make(chan struct{}, 1)},
+		{id: "async", c: make(chan struct{}, 1)},
+	}
+	p := &RPCPool{
+		transmissionType: PoolBroadcastAsync,
+	}
+	for _, i := range c {
+		p.connections = append(p.connections, i)
+	}
+	d := make(chan struct{}, 1)
+	go func() {
+		var response string
+		defer close(d)
+		if err := p.Call("", "", &response); err != nil {
+			t.Error(err)
+			return
+		}
+		if response != "" {
+			t.Error("Error calling client: ", response)
+		}
+	}()
+	select {
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("Timeout")
+	case <-d:
+	}
+	for _, i := range c {
+		runtime.Gosched()
+		close(i.c)
+		if !i.used {
+			t.Fatalf("Expected all connection to be called")
+		}
+	}
+
 }
