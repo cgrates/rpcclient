@@ -54,9 +54,9 @@ const (
 	PoolAsync          = "*async"
 	PoolRandom         = "*random"
 	PoolNext           = "*next"
-	PoolBroadcast      = "*broadcast"
 	PoolFirstPositive  = "*first_positive"
 	PoolParallel       = "*parallel"
+	PoolBroadcast      = "*broadcast"
 	PoolBroadcastSync  = "*broadcast_sync"
 	PoolBroadcastAsync = "*broadcast_async"
 )
@@ -501,6 +501,9 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		}
 		return
 	case PoolBroadcastSync:
+		// if all are succesfuly run the error is nil and result is populated
+		// if all are network errors return the last network error
+		// in rest return ErrPartiallyExecuted
 		var wg sync.WaitGroup
 		errChan := make(chan error, len(pool.connections))
 		for _, rc := range pool.connections {
@@ -519,17 +522,16 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		}
 		wg.Wait() // wait for synchronous replication to finish
 		close(errChan)
-		var hasErr bool
-		for chanErr := range errChan {
-			if !IsNetworkError(chanErr) {
-				logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
-				hasErr = true
-			} else {
-				err = chanErr
-			}
+		// have errors but not all Calls failed
+		if len(errChan) != 0 && len(errChan) < len(pool.connections) {
+			return ErrPartiallyExecuted
 		}
-		if err == nil && hasErr {
-			err = ErrPartiallyExecuted
+		// if all calls failed check if all are network errors
+		for err = range errChan {
+			if !IsNetworkError(err) {
+				logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
+				return ErrPartiallyExecuted
+			}
 		}
 	}
 	return
@@ -557,20 +559,21 @@ func roundIndex(start, max int) (result []int) {
 	return
 }
 
+// IsNetworkError will decide if an error is network generated or RPC one
 func IsNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if _, isNetError := err.(*net.OpError); isNetError {
+	if _, isNetError := err.(*net.OpError); isNetError { // connection reset
 		return true
 	}
 	if _, isDNSError := err.(*net.DNSError); isDNSError {
 		return true
 	}
-	return err == rpc.ErrShutdown ||
-		err == ErrReqUnsynchronized ||
-		err == ErrDisconnected ||
-		err == ErrReplyTimeout ||
+	return err.Error() == rpc.ErrShutdown.Error() ||
+		err.Error() == ErrReqUnsynchronized.Error() ||
+		err.Error() == ErrDisconnected.Error() ||
+		err.Error() == ErrReplyTimeout.Error() ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		strings.HasPrefix(err.Error(), "rpc: can't find service")
 }
