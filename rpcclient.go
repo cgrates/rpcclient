@@ -422,7 +422,9 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 	switch pool.transmissionType {
 	case PoolBroadcast:
 		replyChan := make(chan *rpcReplyError, len(pool.connections))
+		var wg sync.WaitGroup
 		for _, rc := range pool.connections {
+			wg.Add(1)
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
@@ -430,15 +432,28 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 				if !IsNetworkError(err) {
 					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
 				}
+				wg.Done()
 			}(rc)
 		}
-		//get first response with timeout
+		// in case each client returns an NetworkError
+		// wait until all calls ended not until timeout
+		allConnsEnded := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(allConnsEnded)
+		}()
+		// get first response with timeout
 		var re *rpcReplyError
+		tm := time.NewTimer(pool.replyTimeout)
 		select {
 		case re = <-replyChan:
-		case <-time.After(pool.replyTimeout):
+		case <-allConnsEnded:
+			tm.Stop()
+			return ErrDisconnected
+		case <-tm.C:
 			return ErrReplyTimeout
 		}
+		tm.Stop()
 		// put received value in the orig reply
 		reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(re.reply).Elem())
 		return re.err
