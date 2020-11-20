@@ -164,11 +164,22 @@ func TestPoolBrodcast(t *testing.T) {
 		t.Error("Error calling client: ", response)
 	}
 	p = &RPCPool{
+		replyTimeout:     25 * time.Millisecond,
 		transmissionType: PoolBroadcast,
-		connections:      []ClientConnector{},
+		connections: []ClientConnector{
+			&MockRPCClient{id: "sleep"},
+		},
 	}
 	if err := p.Call("", "", &response); err != ErrReplyTimeout {
 		t.Errorf("Expected error %s received:%v ", ErrReplyTimeout, err)
+	}
+	p = &RPCPool{
+		transmissionType: PoolBroadcast,
+		replyTimeout:     time.Second,
+		connections:      []ClientConnector{},
+	}
+	if err := p.Call("", "", &response); err != ErrDisconnected {
+		t.Errorf("Expected error %s received:%v ", ErrDisconnected, err)
 	}
 }
 
