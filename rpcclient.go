@@ -38,6 +38,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cenkalti/rpc2"
+	jsonrpc2 "github.com/cenkalti/rpc2/jsonrpc"
 )
 
 // Constants to define the codec for RpcClient
@@ -46,6 +49,10 @@ const (
 	HTTPjson    = "*http_jsonrpc"
 	GOBrpc      = "*gob"
 	InternalRPC = "*internal"
+
+	BiRPCJSON     = "*birpc_json"
+	BiRPCGOB      = "*birpc_gob"
+	BiRPCInternal = "*birpc_internal"
 )
 
 // Constants to define the strategy for RpcClientPool
@@ -74,6 +81,7 @@ var (
 	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
 	ErrSessionNotFound         = errors.New("SESSION_NOT_FOUND")
 	ErrPartiallyExecuted       = errors.New("PARTIALLY_EXECUTED")
+	ErrUnsupportedBiRPC        = errors.New("UNSUPPORTED_BIRPC")
 )
 var logger *syslog.Writer
 
@@ -94,13 +102,27 @@ func Fib() func() time.Duration {
 func NewRPCClient(transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
-	internalChan chan ClientConnector, lazyConnect bool) (rpcClient *RPCClient, err error) {
-	if codec != InternalRPC && codec != JSONrpc && codec != HTTPjson && codec != GOBrpc {
+	internalChan chan ClientConnector, lazyConnect bool,
+	biRPCClient BiRPCConector) (rpcClient *RPCClient, err error) {
+	switch codec {
+	case InternalRPC:
+		if reflect.ValueOf(internalChan).IsNil() {
+			err = ErrInternallyDisconnected
+			return
+		}
+	case BiRPCJSON, BiRPCGOB, BiRPCInternal:
+		if codec == BiRPCInternal &&
+			reflect.ValueOf(internalChan).IsNil() {
+			err = ErrInternallyDisconnected
+			return
+		}
+		if biRPCClient == nil {
+			err = ErrUnsupportedBiRPC
+			return
+		}
+	case JSONrpc, HTTPjson, GOBrpc:
+	default:
 		err = ErrUnsupportedCodec
-		return
-	}
-	if codec == InternalRPC && reflect.ValueOf(internalChan).IsNil() {
-		err = ErrInternallyDisconnected
 		return
 	}
 	rpcClient = &RPCClient{
@@ -115,6 +137,7 @@ func NewRPCClient(transport, addr string, tls bool,
 		replyTimeout: replyTimeout,
 		codec:        codec,
 		internalChan: internalChan,
+		biRPCClient:  biRPCClient,
 	}
 	if lazyConnect {
 		return
@@ -145,13 +168,13 @@ type RPCClient struct {
 	connection   ClientConnector
 	connMux      sync.RWMutex // protects connection
 	internalChan chan ClientConnector
+	biRPCClient  BiRPCConector
 }
 
 func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err error) {
 	var cert tls.Certificate
 	if clientCrt != "" && clientKey != "" {
-		cert, err = tls.LoadX509KeyPair(clientCrt, clientKey)
-		if err != nil {
+		if cert, err = tls.LoadX509KeyPair(clientCrt, clientKey); err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when load client cert and key", err))
 			return
 		}
@@ -162,9 +185,6 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 		logger.Crit(fmt.Sprintf("Error: %s when load SystemCertPool", err))
 		return
 	}
-	if rootCAs == nil {
-		rootCAs = x509.NewCertPool()
-	}
 
 	if caPath != "" {
 		var ca []byte
@@ -173,7 +193,7 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 			return
 		}
 
-		if ok := rootCAs.AppendCertsFromPEM(ca); !ok {
+		if !rootCAs.AppendCertsFromPEM(ca) {
 			logger.Crit(fmt.Sprintf("Cannot append certificate authority"))
 			return
 		}
@@ -189,58 +209,106 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 func (client *RPCClient) connect() (err error) {
 	client.connMux.Lock()
 	defer client.connMux.Unlock()
-	if client.codec == InternalRPC {
-		if client.connection == nil {
-			select {
-			case client.connection = <-client.internalChan:
-				client.internalChan <- client.connection
-				if client.connection == nil {
-					return ErrDisconnected
-				}
-			case <-time.After(client.connTimeout):
+	var newClient func(conn io.ReadWriteCloser) ClientConnector
+	switch client.codec {
+	case InternalRPC:
+		if client.connection != nil {
+			return
+		}
+		select {
+		case client.connection = <-client.internalChan:
+			client.internalChan <- client.connection
+			if client.connection == nil {
 				return ErrDisconnected
 			}
+		case <-time.After(client.connTimeout):
+			return ErrDisconnected
 		}
 		return
-	}
-	if client.codec == HTTPjson {
+	case HTTPjson:
 		if client.tls {
 			var config *tls.Config
 			if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
 				return
 			}
-			transport := &http.Transport{TLSClientConfig: config}
-			httpClient := &http.Client{Transport: transport}
-			client.connection = &HTTPjsonRPCClient{httpClient: httpClient, url: client.address}
-		} else {
-			client.connection = &HTTPjsonRPCClient{httpClient: new(http.Client), url: client.address}
+			client.connection = &HTTPjsonRPCClient{
+				httpClient: &http.Client{
+					Transport: &http.Transport{
+						TLSClientConfig: config,
+					},
+				},
+				url: client.address,
+			}
+			return
+		}
+		client.connection = &HTTPjsonRPCClient{httpClient: new(http.Client), url: client.address}
+		return
+	case JSONrpc:
+		newClient = func(conn io.ReadWriteCloser) ClientConnector { return jsonrpc.NewClient(conn) }
+	case GOBrpc:
+		newClient = func(conn io.ReadWriteCloser) ClientConnector { return rpc.NewClient(conn) }
+	case BiRPCInternal:
+		if client.connection != nil {
+			return
+		}
+		select {
+		case server := <-client.internalChan:
+			client.internalChan <- server
+			if server == nil {
+				return ErrDisconnected
+			}
+			bircpServer, canCast := server.(BiRPCConector)
+			if !canCast {
+				return ErrUnsupportedBiRPC
+			}
+			client.connection = &BiRPCInternalServer{
+				Client:        client.biRPCClient,
+				BiRPCConector: bircpServer,
+			}
+		case <-time.After(client.connTimeout):
+			return ErrDisconnected
 		}
 		return
+	case BiRPCJSON:
+		newClient = func(conn io.ReadWriteCloser) ClientConnector {
+			c := rpc2.NewClientWithCodec(jsonrpc2.NewJSONCodec(conn))
+			for fName, f := range client.biRPCClient.Handlers() {
+				c.Handle(fName, f)
+			}
+			go c.Run()
+			return c
+		}
+	case BiRPCGOB:
+		newClient = func(conn io.ReadWriteCloser) ClientConnector {
+			c := rpc2.NewClient(conn)
+			for fName, f := range client.biRPCClient.Handlers() {
+				c.Handle(fName, f)
+			}
+			go c.Run()
+			return c
+		}
+
 	}
 	var netconn io.ReadWriteCloser
+	if netconn, err = client.newNetConn(); err != nil {
+		// logger.Crit(fmt.Sprintf("Error: %s when dialing", err.Error()))
+		client.connection = nil // So we don't wrap nil into the interface
+		return
+	}
+	client.connection = newClient(netconn)
+	return
+}
+
+func (client *RPCClient) newNetConn() (netconn io.ReadWriteCloser, err error) {
 	if client.tls {
 		var config *tls.Config
 		if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
 			return
 		}
-		if netconn, err = tls.Dial(client.transport, client.address, config); err != nil {
-			logger.Crit(fmt.Sprintf("Error: %s when dialing", err.Error()))
-			return
-		}
-	} else {
-		// RPC compliant connections here, manually create connection to timeout
-		if netconn, err = net.DialTimeout(client.transport, client.address, client.connTimeout); err != nil {
-			client.connection = nil // So we don't wrap nil into the interface
-			return
-		}
+		return tls.Dial(client.transport, client.address, config)
 	}
-
-	if client.codec == JSONrpc {
-		client.connection = jsonrpc.NewClient(netconn)
-	} else {
-		client.connection = rpc.NewClient(netconn)
-	}
-	return
+	// RPC compliant connections here, manually create connection to timeout
+	return net.DialTimeout(client.transport, client.address, client.connTimeout)
 }
 
 func (client *RPCClient) isConnected() bool {
@@ -251,11 +319,11 @@ func (client *RPCClient) isConnected() bool {
 
 func (client *RPCClient) disconnect() (err error) {
 	switch client.codec {
-	case InternalRPC, HTTPjson:
+	case InternalRPC, HTTPjson, BiRPCInternal:
 	default:
 		client.connMux.Lock()
 		if client.connection != nil {
-			client.connection.(*rpc.Client).Close()
+			client.connection.(io.Closer).Close()
 			client.connection = nil
 		}
 		client.connMux.Unlock()
@@ -597,7 +665,8 @@ func IsNetworkError(err error) bool {
 func NewRPCParallelClientPool(transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
-	internalChan chan ClientConnector, maxCounter int64, initConns bool) (rpcClient *RPCParallelClientPool, err error) {
+	internalChan chan ClientConnector, maxCounter int64, initConns bool,
+	biRPCClient BiRPCConector) (rpcClient *RPCParallelClientPool, err error) {
 	if codec != InternalRPC && codec != JSONrpc && codec != HTTPjson && codec != GOBrpc {
 		err = ErrUnsupportedCodec
 		return
@@ -619,6 +688,7 @@ func NewRPCParallelClientPool(transport, addr string, tls bool,
 		replyTimeout:    replyTimeout,
 		codec:           codec,
 		internalChan:    internalChan,
+		biRPCClient:     biRPCClient,
 
 		connectionsChan: make(chan ClientConnector, maxCounter),
 	}
@@ -642,6 +712,7 @@ type RPCParallelClientPool struct {
 	replyTimeout    time.Duration
 	codec           string // JSONrpc or GOBrpc
 	internalChan    chan ClientConnector
+	biRPCClient     BiRPCConector
 
 	connectionsChan chan ClientConnector
 	counterMux      sync.RWMutex
@@ -665,7 +736,7 @@ func (pool *RPCParallelClientPool) Call(serviceMethod string, args interface{}, 
 			if conn, err = NewRPCClient(pool.transport, pool.address, pool.tls,
 				pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
 				pool.connTimeout, pool.replyTimeout, pool.codec,
-				pool.internalChan, false); err != nil {
+				pool.internalChan, false, pool.biRPCClient); err != nil {
 				pool.counterMux.Lock()
 				pool.counter-- // remove the conter if the connection was never created
 				pool.counterMux.Unlock()
@@ -684,10 +755,28 @@ func (pool *RPCParallelClientPool) initConns() (err error) {
 		if conn, err = NewRPCClient(pool.transport, pool.address, pool.tls,
 			pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
 			pool.connTimeout, pool.replyTimeout, pool.codec,
-			pool.internalChan, false); err != nil {
+			pool.internalChan, false, pool.biRPCClient); err != nil {
 			return
 		}
 		pool.connectionsChan <- conn
 	}
 	return
+}
+
+// BiRPCConector the interface the objects need to implement in order to use biRPC
+type BiRPCConector interface {
+	ClientConnector
+	CallBiRPC(ClientConnector, string, interface{}, interface{}) error
+	Handlers() map[string]interface{}
+}
+
+// BiRPCInternalServer the server mock for internal biRPC connection
+type BiRPCInternalServer struct {
+	Client ClientConnector
+	BiRPCConector
+}
+
+// Call ClientConnector imlementation
+func (brpc *BiRPCInternalServer) Call(serviceMethod string, args, reply interface{}) (err error) {
+	return brpc.CallBiRPC(brpc.Client, serviceMethod, args, reply)
 }
