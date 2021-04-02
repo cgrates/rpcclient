@@ -1,6 +1,7 @@
 package rpcclient
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +34,7 @@ func (m *MockRPCClient) Echo(args string, reply *string) error {
 
 func (m *MockRPCClient) EchoBiRPC(clnt *rpc2.Client, args string, reply *string) error {
 	*reply += m.id
-	m.cl = clnt
+	m.cl = &BiRPCClient{clnt}
 	return nil
 }
 
@@ -43,7 +44,7 @@ func (m *MockRPCClient) Handlers() map[string]interface{} {
 	}
 }
 
-func (m *MockRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) error {
+func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
 	switch m.id {
 	case "offline":
 		return ErrReqUnsynchronized
@@ -65,7 +66,7 @@ func (m *MockRPCClient) Call(serviceMethod string, args interface{}, reply inter
 	}
 }
 
-func (m *MockRPCClient) CallBiRPC(cl ClientConnector, serviceMethod string, args interface{}, reply interface{}) error {
+func (m *MockRPCClient) CallBiRPC(ctx context.Context, cl ClientConnector, serviceMethod string, args interface{}, reply interface{}) error {
 	m.cl = cl
 	switch m.id {
 	case "offline":
@@ -75,7 +76,7 @@ func (m *MockRPCClient) CallBiRPC(cl ClientConnector, serviceMethod string, args
 	case "nerr":
 		return rpc.ErrShutdown
 	case "callBiRPC":
-		return cl.Call("", args, reply)
+		return cl.Call(ctx, "", args, reply)
 	case "async":
 		m.used = true
 		time.Sleep(20 * time.Millisecond)
@@ -101,7 +102,7 @@ func TestPoolFirst(t *testing.T) {
 		},
 	}
 	var response string
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "1" {
 		t.Error("Error calling client: ", response)
 	}
@@ -114,7 +115,7 @@ func TestPoolFirst(t *testing.T) {
 			&MockRPCClient{id: "4"},
 		},
 	}
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "12" {
 		t.Error("Error calling client: ", response)
 	}
@@ -132,7 +133,7 @@ func TestPoolFirstAsync(t *testing.T) {
 	}
 	var response string
 	// we don't verify the response because the connection is asynchronous
-	if err := p.Call("", "", &response); err != nil {
+	if err := p.Call(context.Background(), "", "", &response); err != nil {
 		return
 	}
 
@@ -145,7 +146,7 @@ func TestPoolFirstAsync(t *testing.T) {
 			&MockRPCClient{id: "4"},
 		},
 	}
-	if err := p.Call("", "", &response); err != nil {
+	if err := p.Call(context.Background(), "", "", &response); err != nil {
 		return
 	}
 
@@ -162,12 +163,12 @@ func TestPoolNext(t *testing.T) {
 		},
 	}
 	var response string
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "1" {
 		t.Error("Error calling client: ", response)
 	}
 
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "12" {
 		t.Error("Error calling client: ", response)
 	}
@@ -183,7 +184,7 @@ func TestPoolNext(t *testing.T) {
 		},
 	}
 	response = ""
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "1" {
 		t.Error("Error calling client: ", response)
 	}
@@ -201,7 +202,7 @@ func TestPoolBrodcast(t *testing.T) {
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err != nil {
+	if err := p.Call(context.Background(), "", "", &response); err != nil {
 		t.Error("Got error: ", err)
 	}
 	if len(response) != 1 {
@@ -214,7 +215,7 @@ func TestPoolBrodcast(t *testing.T) {
 			&MockRPCClient{id: "sleep"},
 		},
 	}
-	if err := p.Call("", "", &response); err != ErrReplyTimeout {
+	if err := p.Call(context.Background(), "", "", &response); err != ErrReplyTimeout {
 		t.Errorf("Expected error %s received:%v ", ErrReplyTimeout, err)
 	}
 	p = &RPCPool{
@@ -222,7 +223,7 @@ func TestPoolBrodcast(t *testing.T) {
 		replyTimeout:     time.Second,
 		connections:      []ClientConnector{},
 	}
-	if err := p.Call("", "", &response); err != ErrDisconnected {
+	if err := p.Call(context.Background(), "", "", &response); err != ErrDisconnected {
 		t.Errorf("Expected error %s received:%v ", ErrDisconnected, err)
 	}
 }
@@ -238,7 +239,7 @@ func TestPoolBrodcastSyncWithError(t *testing.T) {
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err != ErrPartiallyExecuted {
+	if err := p.Call(context.Background(), "", "", &response); err != ErrPartiallyExecuted {
 		t.Errorf("Expected error %s received:%v ", ErrPartiallyExecuted, err)
 	}
 	if len(response) != 1 {
@@ -254,7 +255,7 @@ func TestPoolBrodcastSyncWithError(t *testing.T) {
 		},
 	}
 	var response2 string
-	if err := p.Call("", "", &response2); err != ErrPartiallyExecuted {
+	if err := p.Call(context.Background(), "", "", &response2); err != ErrPartiallyExecuted {
 		t.Errorf("Expected error %s received:%v ", ErrPartiallyExecuted, err)
 	}
 	if len(response2) != 0 {
@@ -269,7 +270,7 @@ func TestPoolBrodcastSyncWithError(t *testing.T) {
 			&MockRPCClient{id: "nerr"},
 		},
 	}
-	if err := p.Call("", "", &response2); err != rpc.ErrShutdown {
+	if err := p.Call(context.Background(), "", "", &response2); err != rpc.ErrShutdown {
 		t.Errorf("Expected error %s received:%v ", rpc.ErrShutdown, err)
 	}
 	if len(response2) != 0 {
@@ -288,7 +289,7 @@ func TestPoolBrodcastSyncWithoutError(t *testing.T) {
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err != nil {
+	if err := p.Call(context.Background(), "", "", &response); err != nil {
 		t.Error("Got error: ", err)
 	}
 	if len(response) != 1 {
@@ -310,7 +311,7 @@ func TestPoolRANDOM(t *testing.T) {
 	m := make(map[string]struct{}, 4)
 	for i := 0; i < 100; i++ {
 		var response string
-		if err := p.Call("", "", &response); err != nil {
+		if err := p.Call(context.Background(), "", "", &response); err != nil {
 			t.Error("Got error: ", err)
 		}
 		m[response] = struct{}{}
@@ -331,7 +332,7 @@ func TestWrongPool(t *testing.T) { // in case of a unknow pool we do nothing at 
 		},
 	}
 	var response string
-	if err := p.Call("", "", &response); err != nil {
+	if err := p.Call(context.Background(), "", "", &response); err != nil {
 		t.Error("Got error: ", err)
 	}
 	if len(response) != 0 {
@@ -350,7 +351,7 @@ func TestPoolFirstPositive(t *testing.T) {
 		},
 	}
 	var response string
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "3" {
 		t.Error("Error calling client: ", response)
 	}
@@ -365,7 +366,7 @@ func TestPoolFirstPositive(t *testing.T) {
 		},
 	}
 	response = ""
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
 	}
@@ -380,7 +381,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reply string
-	if err = rpcppool.Call("", "", &reply); err != nil {
+	if err = rpcppool.Call(context.Background(), "", "", &reply); err != nil {
 		t.Error(err)
 	} else if reply != "1" {
 		t.Errorf("Expected: \"1\" received: %q", reply)
@@ -390,7 +391,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Errorf("Expected: 1 received: %v", len(rpcppool.connectionsChan))
 	}
 	reply = ""
-	if err = rpcppool.Call("", "", &reply); err != nil { // this should take the connection from earlier
+	if err = rpcppool.Call(context.Background(), "", "", &reply); err != nil { // this should take the connection from earlier
 		t.Error(err)
 	} else if reply != "1" {
 		t.Errorf("Expected: \"1\" received: %q", reply)
@@ -405,7 +406,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Fatal(err)
 	}
 	rpcppool.codec = "Not a supported codec"
-	if err = rpcppool.Call("", "", &reply); err != ErrUnsupportedCodec {
+	if err = rpcppool.Call(context.Background(), "", "", &reply); err != ErrUnsupportedCodec {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 
@@ -432,7 +433,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 	var group sync.WaitGroup
 	parlallel := func(t *testing.T) {
 		reply := ""
-		if err = rpcppool.Call("", "", &reply); err != nil { // this should take the connection from earlier
+		if err = rpcppool.Call(context.Background(), "", "", &reply); err != nil { // this should take the connection from earlier
 			t.Error(err)
 		} else if reply != "sleep" {
 			t.Errorf("Expected: \"sleep\" received: %q", reply)
@@ -612,7 +613,7 @@ func TestNewRPCClient(t *testing.T) {
 	if client.isConnected() {
 		t.Errorf("Expected to not start the connection if lazzyConnect is on true")
 	}
-	client, err = NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
+	_, err = NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, JSONrpc, nil, false, nil)
 	if err == nil {
 		t.Errorf("Expected connection error received:%v", err)
@@ -718,27 +719,27 @@ func TestRPCClientCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	experrMsg := fmt.Sprintf("nil rpc in argument method: %s in: %v out: %v", "", nil, nil)
-	if err = client.Call("", nil, nil); err == nil || err.Error() != experrMsg {
+	if err = client.Call(context.Background(), "", nil, nil); err == nil || err.Error() != experrMsg {
 		t.Errorf("Expected error: %s received: %v", experrMsg, err)
 	}
 
 	client.connection = nil
 	var reply *string
 	experrMsg = fmt.Sprintf("nil rpc in argument method: %s in: %v out: %v", "", "", nil)
-	if err = client.Call("", "", reply); err == nil || err.Error() != experrMsg {
+	if err = client.Call(context.Background(), "", "", reply); err == nil || err.Error() != experrMsg {
 		t.Errorf("Expected error: %s received: %v", experrMsg, err)
 	}
 	reply = new(string)
-	if err = client.Call("", "", reply); err != nil {
+	if err = client.Call(context.Background(), "", "", reply); err != nil {
 		t.Error(err)
 	}
 
 	experrMsg = "Not cloneable"
-	if err = client.Call("", cloner(0), reply); err != nil {
+	if err = client.Call(context.Background(), "", cloner(0), reply); err != nil {
 		t.Error(err)
 	}
 
-	if err = client.Call("", cloner(-1), reply); err == nil || err.Error() != experrMsg {
+	if err = client.Call(context.Background(), "", cloner(-1), reply); err == nil || err.Error() != experrMsg {
 		t.Errorf("Expected error: %s received: %v", experrMsg, err)
 	}
 
@@ -750,7 +751,7 @@ func TestRPCClientCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	client.connection = nil
-	if err = client.Call("", "", reply); err != ErrDisconnected {
+	if err = client.Call(context.Background(), "", "", reply); err != ErrDisconnected {
 		t.Errorf("Expected error: %s received: %v", ErrDisconnected, err)
 	}
 	internalChan = make(chan ClientConnector, 1)
@@ -760,7 +761,7 @@ func TestRPCClientCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.Call("", "", reply); err != ErrReplyTimeout {
+	if err = client.Call(context.Background(), "", "", reply); err != ErrReplyTimeout {
 		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
 	}
 }
@@ -774,7 +775,7 @@ func TestRPCClientCallTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reply string
-	if err = cl.Call("", "", &reply); err != ErrReplyTimeout {
+	if err = cl.Call(context.Background(), "", "", &reply); err != ErrReplyTimeout {
 		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
 	}
 }
@@ -796,7 +797,7 @@ func TestRPCPoolBroadcastAsync(t *testing.T) {
 	go func() {
 		var response string
 		defer close(d)
-		if err := p.Call("", "", &response); err != nil {
+		if err := p.Call(context.Background(), "", "", &response); err != nil {
 			t.Error(err)
 			return
 		}
@@ -846,7 +847,7 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	}
 
 	var response string
-	p.Call("", "", &response)
+	p.Call(context.Background(), "", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
 	}

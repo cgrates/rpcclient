@@ -20,6 +20,7 @@ package rpcclient
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -31,13 +32,14 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
-	"net/rpc"
-	"net/rpc/jsonrpc"
 	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cgrates/rpc"
+	"github.com/cgrates/rpcclient/jsonrpc"
 
 	"github.com/cenkalti/rpc2"
 	jsonrpc2 "github.com/cenkalti/rpc2/jsonrpc"
@@ -290,7 +292,7 @@ func (client *RPCClient) connect() (err error) {
 				c.Handle(fName, f)
 			}
 			go c.Run()
-			return c
+			return &BiRPCClient{c}
 		}
 	case BiRPCGOB:
 		newClient = func(conn io.ReadWriteCloser) ClientConnector {
@@ -299,7 +301,7 @@ func (client *RPCClient) connect() (err error) {
 				c.Handle(fName, f)
 			}
 			go c.Run()
-			return c
+			return &BiRPCClient{c}
 		}
 
 	}
@@ -362,7 +364,7 @@ func (client *RPCClient) reconnect() (err error) {
 }
 
 // Call the method needed to implement ClientConnector
-func (client *RPCClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *RPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	if args == nil || reply == nil || reflect.ValueOf(reply).IsNil() { // panics  on zero Value if not checked
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
@@ -373,42 +375,27 @@ func (client *RPCClient) Call(serviceMethod string, args interface{}, reply inte
 			}
 		}
 	}
-	errChan := make(chan error, 1)
-	timeOut := time.NewTimer(client.replyTimeout)
-	go client.call(serviceMethod, args, reply, errChan)
-	select {
-	case err = <-errChan:
-	case <-timeOut.C:
-		err = ErrReplyTimeout
-		return
-	}
+	ctx2, cancel := context.WithTimeout(ctx, client.replyTimeout)
+	defer cancel()
+	err = client.call(ctx2, serviceMethod, args, reply)
 	if !IsNetworkError(err) ||
-		err == ErrReplyTimeout ||
+		err == context.DeadlineExceeded ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		client.reconnects == 0 {
-		timeOut.Stop()
 		return
 	}
 	if errReconnect := client.reconnect(); errReconnect != nil {
 		return
 	}
-	go client.call(serviceMethod, args, reply, errChan)
-	select {
-	case err = <-errChan:
-		timeOut.Stop()
-	case <-timeOut.C:
-		err = ErrReplyTimeout
-		return
-	}
-	return
+	return client.call(ctx, serviceMethod, args, reply)
 }
 
-func (client *RPCClient) call(serviceMethod string, args interface{}, reply interface{}, errChan chan error) {
+func (client *RPCClient) call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	client.connMux.RLock()
 	if client.connection == nil {
-		errChan <- ErrDisconnected
+		err = ErrDisconnected
 	} else {
-		errChan <- client.connection.Call(serviceMethod, args, reply)
+		err = client.connection.Call(ctx, serviceMethod, args, reply)
 	}
 	client.connMux.RUnlock()
 	return
@@ -416,7 +403,7 @@ func (client *RPCClient) call(serviceMethod string, args interface{}, reply inte
 
 // ClientConnector is the connection used in RpcClient, as interface so we can combine the rpc.RpcClient with http one or websocket
 type ClientConnector interface {
-	Call(serviceMethod string, args interface{}, reply interface{}) (err error)
+	Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error)
 }
 
 // RPCCloner is an interface for objects to clone parts of themselves which are affected by concurrency at the time of RPC call
@@ -439,7 +426,7 @@ type HTTPjsonRPCClient struct {
 }
 
 // Call the method needed to implement ClientConnector
-func (client *HTTPjsonRPCClient) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *HTTPjsonRPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	client.id++
 	id := client.id
 	var data []byte
@@ -450,9 +437,15 @@ func (client *HTTPjsonRPCClient) Call(serviceMethod string, args interface{}, re
 	}); err != nil {
 		return
 	}
+
+	var req *http.Request
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, client.url, io.NopCloser(bytes.NewBuffer(data)))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
 	var resp *http.Response
-	if resp, err = client.httpClient.Post(client.url, "application/json",
-		io.NopCloser(bytes.NewBuffer(data))); err != nil {
+	if resp, err = client.httpClient.Do(req); err != nil {
 		return
 	}
 	defer resp.Body.Close()
@@ -500,17 +493,19 @@ func (pool *RPCPool) AddClient(rcc ClientConnector) {
 }
 
 // Call the method needed to implement ClientConnector
-func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (pool *RPCPool) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	switch pool.transmissionType {
 	case PoolBroadcast:
 		replyChan := make(chan *rpcReplyError, len(pool.connections))
+		ctx2, cancel := context.WithTimeout(ctx, pool.replyTimeout)
+		defer cancel()
 		var wg sync.WaitGroup
 		for _, rc := range pool.connections {
 			wg.Add(1)
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
-				err := conn.Call(serviceMethod, args, rpl.Interface())
+				err := conn.Call(ctx2, serviceMethod, args, rpl.Interface())
 				if !IsNetworkError(err) {
 					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
 				}
@@ -526,16 +521,11 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		}()
 		// get first response with timeout
 		var re *rpcReplyError
-		tm := time.NewTimer(pool.replyTimeout)
 		select {
 		case re = <-replyChan:
 		case <-allConnsEnded:
-			tm.Stop()
 			return ErrDisconnected
-		case <-tm.C:
-			return ErrReplyTimeout
 		}
-		tm.Stop()
 		// put received value in the orig reply
 		reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(re.reply).Elem())
 		return re.err
@@ -544,28 +534,25 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
-				conn.Call(serviceMethod, args, rpl.Interface())
+				conn.Call(ctx, serviceMethod, args, rpl.Interface())
 			}(rc)
 		}
 		return nil
 	case PoolFirst:
 		for _, rc := range pool.connections {
-			err = rc.Call(serviceMethod, args, reply)
-			if IsNetworkError(err) {
-				continue
+			err = rc.Call(ctx, serviceMethod, args, reply)
+			if !IsNetworkError(err) {
+				return
 			}
-			return
 		}
 	case PoolAsync:
 		go func() {
 			// because the call is async we need to copy the reply to avoid overwrite
 			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 			for _, rc := range pool.connections {
-				err := rc.Call(serviceMethod, args, rpl.Interface())
-				if IsNetworkError(err) {
-					continue
+				if !IsNetworkError(rc.Call(ctx, serviceMethod, args, rpl.Interface())) {
+					return
 				}
-				return
 			}
 		}()
 	case PoolNext:
@@ -573,17 +560,16 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		rrIndexes := roundIndex(int(math.Mod(float64(pool.counter), float64(ln))), ln)
 		pool.counter++
 		for _, index := range rrIndexes {
-			err = pool.connections[index].Call(serviceMethod, args, reply)
-			if IsNetworkError(err) {
-				continue
+			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
+			if !IsNetworkError(err) {
+				return
 			}
-			return
 		}
 	case PoolRandom:
 		rand.Seed(time.Now().UnixNano())
 		randomIndex := rand.Perm(len(pool.connections))
 		for _, index := range randomIndex {
-			err = pool.connections[index].Call(serviceMethod, args, reply)
+			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
 			if IsNetworkError(err) {
 				continue
 			}
@@ -591,7 +577,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 		}
 	case PoolFirstPositive:
 		for _, rc := range pool.connections {
-			err = rc.Call(serviceMethod, args, reply)
+			err = rc.Call(ctx, serviceMethod, args, reply)
 			if err == nil {
 				break
 			}
@@ -608,7 +594,7 @@ func (pool *RPCPool) Call(serviceMethod string, args interface{}, reply interfac
 			go func(conn ClientConnector) {
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
-				err := conn.Call(serviceMethod, args, rpl.Interface())
+				err := conn.Call(ctx, serviceMethod, args, rpl.Interface())
 				if err != nil {
 					errChan <- err
 				} else {
@@ -734,7 +720,7 @@ type RPCParallelClientPool struct {
 }
 
 // Call the method needed to implement ClientConnector
-func (pool *RPCParallelClientPool) Call(serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (pool *RPCParallelClientPool) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	var conn ClientConnector
 	select {
 	case conn = <-pool.connectionsChan:
@@ -758,7 +744,7 @@ func (pool *RPCParallelClientPool) Call(serviceMethod string, args interface{}, 
 			}
 		}
 	}
-	err = conn.Call(serviceMethod, args, reply)
+	err = conn.Call(ctx, serviceMethod, args, reply)
 	pool.connectionsChan <- conn
 	return
 }
@@ -780,7 +766,7 @@ func (pool *RPCParallelClientPool) initConns() (err error) {
 // BiRPCConector the interface the objects need to implement in order to use biRPC
 type BiRPCConector interface {
 	ClientConnector
-	CallBiRPC(ClientConnector, string, interface{}, interface{}) error
+	CallBiRPC(context.Context, ClientConnector, string, interface{}, interface{}) error
 	Handlers() map[string]interface{}
 }
 
@@ -791,6 +777,19 @@ type BiRPCInternalServer struct {
 }
 
 // Call ClientConnector imlementation
-func (brpc *BiRPCInternalServer) Call(serviceMethod string, args, reply interface{}) (err error) {
-	return brpc.CallBiRPC(brpc.Client, serviceMethod, args, reply)
+func (brpc *BiRPCInternalServer) Call(ctx context.Context, serviceMethod string, args, reply interface{}) (err error) {
+	return brpc.CallBiRPC(ctx, brpc.Client, serviceMethod, args, reply)
+}
+
+type BiRPCClient struct {
+	*rpc2.Client
+}
+
+func (c *BiRPCClient) Call(ctx context.Context, serviceMethod string, args, reply interface{}) (err error) {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case call := <-c.Go(serviceMethod, args, reply, make(chan *rpc2.Call, 1)).Done:
+		return call.Error
+	}
 }

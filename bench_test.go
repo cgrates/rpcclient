@@ -1,6 +1,7 @@
 package rpcclient
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/rpc"
@@ -44,7 +45,7 @@ func BenchmarkNewRPCParallelClientPoolWithoutInit(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var reply string
 		for pb.Next() {
-			if err = client.Call("MockRPCClient.Echo", "", &reply); err != nil {
+			if err = client.Call(context.Background(), "MockRPCClient.Echo", "", &reply); err != nil {
 				b.Error(err)
 			}
 		}
@@ -65,7 +66,7 @@ func BenchmarkNewRPCParallelClientPoolWithInit(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var reply string
 		for pb.Next() {
-			if err = client.Call("MockRPCClient.Echo", "", &reply); err != nil {
+			if err = client.Call(context.Background(), "MockRPCClient.Echo", "", &reply); err != nil {
 				b.Error(err)
 			}
 		}
