@@ -35,17 +35,17 @@ type ArithAddResp struct {
 	Error  interface{} `json:"error"`
 }
 
-func (t *Arith) Add(args *Args, reply *Reply) error {
+func (t *Arith) Add(_ context.Context, args *Args, reply *Reply) error {
 	reply.C = args.A + args.B
 	return nil
 }
 
-func (t *Arith) Mul(args *Args, reply *Reply) error {
+func (t *Arith) Mul(_ context.Context, args *Args, reply *Reply) error {
 	reply.C = args.A * args.B
 	return nil
 }
 
-func (t *Arith) Div(args *Args, reply *Reply) error {
+func (t *Arith) Div(_ context.Context, args *Args, reply *Reply) error {
 	if args.B == 0 {
 		return errors.New("divide by zero")
 	}
@@ -53,23 +53,23 @@ func (t *Arith) Div(args *Args, reply *Reply) error {
 	return nil
 }
 
-func (t *Arith) Error(args *Args, reply *Reply) error {
+func (t *Arith) Error(_ context.Context, args *Args, reply *Reply) error {
 	panic("ERROR")
 }
 
 type BuiltinTypes struct{}
 
-func (BuiltinTypes) Map(i int, reply *map[int]int) error {
+func (BuiltinTypes) Map(_ context.Context, i int, reply *map[int]int) error {
 	(*reply)[i] = i
 	return nil
 }
 
-func (BuiltinTypes) Slice(i int, reply *[]int) error {
+func (BuiltinTypes) Slice(_ context.Context, i int, reply *[]int) error {
 	*reply = append(*reply, i)
 	return nil
 }
 
-func (BuiltinTypes) Array(i int, reply *[1]int) error {
+func (BuiltinTypes) Array(_ context.Context, i int, reply *[1]int) error {
 	(*reply)[0] = i
 	return nil
 }
