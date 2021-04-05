@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/rpc"
 	"reflect"
 	"runtime"
@@ -891,4 +892,91 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 		t.Errorf("Expected error %s received:%v ", ErrInternallyDisconnected, err)
 	}
 	close(internalChan)
+}
+
+func TestRPCClientnewNetConnDialError(t *testing.T) {
+	client := &RPCClient{
+		tls:     true,
+		address: "addr",
+	}
+
+	experr := "dial: unknown network "
+	_, err := client.newNetConn()
+
+	if err == nil || err.Error() != experr {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientnewNetConnLoadTLSConfigError(t *testing.T) {
+	client := &RPCClient{
+		tls:      true,
+		address:  "addr",
+		certPath: "invalidCertPath",
+		keyPath:  "invalidKeyPath",
+		caPath:   "invalidCaPath",
+	}
+
+	experr := "open invalidCertPath: no such file or directory"
+	_, err := client.newNetConn()
+
+	if err == nil || err.Error() != experr {
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientconnectTLSTrue(t *testing.T) {
+	client := &RPCClient{
+		tls:   true,
+		codec: HTTPjson,
+	}
+
+	err := client.connect()
+
+	if err != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+}
+func TestRPCClientconnectTLSFalse(t *testing.T) {
+	client := &RPCClient{
+		tls:   false,
+		codec: HTTPjson,
+	}
+
+	err := client.connect()
+
+	if err != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+}
+
+func TestRPCClientconnectInvalidPath(t *testing.T) {
+	client := &RPCClient{
+		tls:    true,
+		codec:  HTTPjson,
+		caPath: "invalid",
+	}
+
+	experr := "open invalid: no such file or directory"
+	err := client.connect()
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallPostFail(t *testing.T) {
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+	}
+	serviceMethod := "POST"
+	var args interface{}
+	var reply interface{}
+
+	experr := "Post \"\": unsupported protocol scheme \"\""
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
 }
