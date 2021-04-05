@@ -34,6 +34,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -188,7 +189,7 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 
 	if caPath != "" {
 		var ca []byte
-		if ca, err = ioutil.ReadFile(caPath); err != nil {
+		if ca, err = os.ReadFile(caPath); err != nil {
 			logger.Crit(fmt.Sprintf("Error: %s when read CA", err))
 			return
 		}
