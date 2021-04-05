@@ -8,13 +8,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/rpc"
 	"reflect"
 	"runtime"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cgrates/rpc"
 
 	"github.com/cenkalti/rpc2"
 )
@@ -27,7 +28,7 @@ type MockRPCClient struct {
 	cl ClientConnector
 }
 
-func (m *MockRPCClient) Echo(args string, reply *string) error {
+func (m *MockRPCClient) Echo(ctx context.Context, args string, reply *string) error {
 	*reply += m.id
 	return nil
 }
@@ -54,11 +55,19 @@ func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args int
 		return rpc.ErrShutdown
 	case "async":
 		m.used = true
-		time.Sleep(20 * time.Millisecond)
-		close(m.c)
-		return rpc.ErrShutdown
+		select {
+		case <-time.After(20 * time.Millisecond):
+			close(m.c)
+			return rpc.ErrShutdown
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	case "sleep":
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-time.After(50 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 		fallthrough
 	default:
 		*reply.(*string) += m.id
@@ -215,8 +224,8 @@ func TestPoolBrodcast(t *testing.T) {
 			&MockRPCClient{id: "sleep"},
 		},
 	}
-	if err := p.Call(context.Background(), "", "", &response); err != ErrReplyTimeout {
-		t.Errorf("Expected error %s received:%v ", ErrReplyTimeout, err)
+	if err := p.Call(context.Background(), "", "", &response); err != context.DeadlineExceeded {
+		t.Errorf("Expected error %s received:%v ", context.DeadlineExceeded, err)
 	}
 	p = &RPCPool{
 		transmissionType: PoolBroadcast,
@@ -761,8 +770,8 @@ func TestRPCClientCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = client.Call(context.Background(), "", "", reply); err != ErrReplyTimeout {
-		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
+	if err = client.Call(context.Background(), "", "", reply); err != context.DeadlineExceeded {
+		t.Errorf("Expected error: %s received: %v", context.DeadlineExceeded, err)
 	}
 }
 
@@ -775,8 +784,8 @@ func TestRPCClientCallTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reply string
-	if err = cl.Call(context.Background(), "", "", &reply); err != ErrReplyTimeout {
-		t.Errorf("Expected error: %s received: %v", ErrReplyTimeout, err)
+	if err = cl.Call(context.Background(), "", "", &reply); err != context.DeadlineExceeded {
+		t.Errorf("Expected error: %s received: %v", context.DeadlineExceeded, err)
 	}
 }
 
