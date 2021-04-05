@@ -387,7 +387,7 @@ func (client *RPCClient) Call(ctx context.Context, serviceMethod string, args in
 	if errReconnect := client.reconnect(); errReconnect != nil {
 		return
 	}
-	return client.call(ctx, serviceMethod, args, reply)
+	return client.call(ctx2, serviceMethod, args, reply)
 }
 
 func (client *RPCClient) call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {

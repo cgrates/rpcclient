@@ -4,10 +4,11 @@ import (
 	"context"
 	"io"
 	"net"
-	"net/rpc"
-	"net/rpc/jsonrpc"
 	"testing"
 	"time"
+
+	"github.com/cgrates/rpc"
+	"github.com/cgrates/rpcclient/jsonrpc"
 )
 
 var (
