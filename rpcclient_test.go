@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cgrates/birpc"
 	"github.com/cgrates/rpc"
 
-	"github.com/cenkalti/rpc2"
+	rpc2 "github.com/cgrates/birpc"
 )
 
 type MockRPCClient struct {
@@ -35,7 +36,7 @@ func (m *MockRPCClient) Echo(ctx context.Context, args string, reply *string) er
 
 func (m *MockRPCClient) EchoBiRPC(clnt *rpc2.Client, args string, reply *string) error {
 	*reply += m.id
-	m.cl = &BiRPCClient{clnt}
+	m.cl = clnt
 	return nil
 }
 
@@ -75,8 +76,8 @@ func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args int
 	}
 }
 
-func (m *MockRPCClient) CallBiRPC(ctx context.Context, cl ClientConnector, serviceMethod string, args interface{}, reply interface{}) error {
-	m.cl = cl
+func (m *MockRPCClient) CallBiRPC(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	m.cl = birpc.ClientValueFromContext(ctx)
 	switch m.id {
 	case "offline":
 		return ErrReqUnsynchronized
@@ -85,7 +86,7 @@ func (m *MockRPCClient) CallBiRPC(ctx context.Context, cl ClientConnector, servi
 	case "nerr":
 		return rpc.ErrShutdown
 	case "callBiRPC":
-		return cl.Call(ctx, "", args, reply)
+		return birpc.ClientValueFromContext(ctx).Call(ctx, "", args, reply)
 	case "async":
 		m.used = true
 		time.Sleep(20 * time.Millisecond)

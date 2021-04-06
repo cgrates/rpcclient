@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/cgrates/rpc"
-	"github.com/cgrates/rpcclient/jsonrpc"
+	"github.com/cgrates/rpc/jsonrpc"
 )
 
 var (
