@@ -38,11 +38,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cgrates/birpc"
 	"github.com/cgrates/rpc"
-	"github.com/cgrates/rpcclient/jsonrpc"
+	"github.com/cgrates/rpc/jsonrpc"
 
-	"github.com/cenkalti/rpc2"
-	jsonrpc2 "github.com/cenkalti/rpc2/jsonrpc"
+	jsonrpc2 "github.com/cgrates/birpc/jsonrpc"
 )
 
 // Constants to define the codec for RpcClient
@@ -287,21 +287,21 @@ func (client *RPCClient) connect() (err error) {
 		return
 	case BiRPCJSON:
 		newClient = func(conn io.ReadWriteCloser) ClientConnector {
-			c := rpc2.NewClientWithCodec(jsonrpc2.NewJSONCodec(conn))
+			c := birpc.NewClientWithCodec(jsonrpc2.NewJSONCodec(conn))
 			for fName, f := range client.biRPCClient.Handlers() {
 				c.Handle(fName, f)
 			}
 			go c.Run()
-			return &BiRPCClient{c}
+			return c
 		}
 	case BiRPCGOB:
 		newClient = func(conn io.ReadWriteCloser) ClientConnector {
-			c := rpc2.NewClient(conn)
+			c := birpc.NewClient(conn)
 			for fName, f := range client.biRPCClient.Handlers() {
 				c.Handle(fName, f)
 			}
 			go c.Run()
-			return &BiRPCClient{c}
+			return c
 		}
 
 	}
@@ -766,30 +766,17 @@ func (pool *RPCParallelClientPool) initConns() (err error) {
 // BiRPCConector the interface the objects need to implement in order to use biRPC
 type BiRPCConector interface {
 	ClientConnector
-	CallBiRPC(context.Context, ClientConnector, string, interface{}, interface{}) error
+	CallBiRPC(context.Context, string, interface{}, interface{}) error
 	Handlers() map[string]interface{}
 }
 
 // BiRPCInternalServer the server mock for internal biRPC connection
 type BiRPCInternalServer struct {
-	Client ClientConnector
+	Client *birpc.Client
 	BiRPCConector
 }
 
 // Call ClientConnector imlementation
 func (brpc *BiRPCInternalServer) Call(ctx context.Context, serviceMethod string, args, reply interface{}) (err error) {
-	return brpc.CallBiRPC(ctx, brpc.Client, serviceMethod, args, reply)
-}
-
-type BiRPCClient struct {
-	*rpc2.Client
-}
-
-func (c *BiRPCClient) Call(ctx context.Context, serviceMethod string, args, reply interface{}) (err error) {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case call := <-c.Go(serviceMethod, args, reply, make(chan *rpc2.Call, 1)).Done:
-		return call.Error
-	}
+	return brpc.CallBiRPC(birpc.WithClient(ctx, brpc.Client), serviceMethod, args, reply)
 }
