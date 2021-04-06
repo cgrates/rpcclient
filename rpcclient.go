@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log/syslog"
 	"math"
 	"math/rand"
@@ -195,7 +194,7 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 		}
 
 		if !rootCAs.AppendCertsFromPEM(ca) {
-			logger.Crit(fmt.Sprintf("Cannot append certificate authority"))
+			logger.Crit("Cannot append certificate authority")
 			return
 		}
 	}
@@ -439,7 +438,7 @@ func (client *HTTPjsonRPCClient) Call(serviceMethod string, args interface{}, re
 	}
 	var resp *http.Response
 	if resp, err = client.httpClient.Post(client.url, "application/json",
-		ioutil.NopCloser(bytes.NewBuffer(data))); err != nil {
+		io.NopCloser(bytes.NewBuffer(data))); err != nil {
 		return
 	}
 	defer resp.Body.Close()
