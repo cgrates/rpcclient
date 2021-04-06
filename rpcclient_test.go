@@ -3,8 +3,10 @@ package rpcclient
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/rpc"
 	"reflect"
 	"runtime"
@@ -969,7 +971,7 @@ func TestRPCClientHTTPjsonCallPostFail(t *testing.T) {
 	client := &HTTPjsonRPCClient{
 		httpClient: http.DefaultClient,
 	}
-	serviceMethod := "POST"
+	serviceMethod := ""
 	var args interface{}
 	var reply interface{}
 
@@ -980,3 +982,147 @@ func TestRPCClientHTTPjsonCallPostFail(t *testing.T) {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
 	}
 }
+
+func TestRPCClientHTTPjsonCallInvalidJSON(t *testing.T) {
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+	}
+	serviceMethod := ""
+	var args interface{} = make(chan int)
+	var reply interface{}
+
+	experr := "json: unsupported type: chan int"
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallDecodeFail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	var args interface{}
+	var reply interface{}
+
+	experr := io.EOF
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallUnsynchronized(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"valid\":\"json\"}"))
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	args := ""
+	var reply *string
+
+	experr := ErrReqUnsynchronized
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallInvalidError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"id\":1,\"method\":\"method\",\"params\":\"args\"}"))
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	args := ""
+	var reply *string
+
+	experr := fmt.Sprintf("invalid error %v", nil)
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallSpecifiedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"ID\":1,\"Error\":\"specified error\",\"Result\":\"result\"}"))
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	args := ""
+	var reply *string
+
+	experr := "specified error"
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallUnspecifiedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"ID\":1,\"Error\":\"\",\"Result\":\"result\"}"))
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	args := ""
+	var reply *string
+
+	experr := "unspecified error"
+	err := client.Call(serviceMethod, args, reply)
+
+	if err == nil || err.Error() != experr {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("{\"ID\":1,\"Result\":\"5\"}"))
+	}))
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+	serviceMethod := ""
+	args := ""
+	var reply string
+
+	err := client.Call(serviceMethod, args, &reply)
+
+	if err != nil {
+		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+}
+
+// func TestRPCClientloadTLSConfig2(t *testing.T) {
+// 	clientCrt := ""
+// 	clientKey := ""
+// 	caPath := ""
+
+// 	rcv, err := loadTLSConfig(clientCrt, clientKey, caPath)
+// 	fmt.Println(rcv, err)
+// }
