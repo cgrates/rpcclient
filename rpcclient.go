@@ -83,7 +83,21 @@ var (
 	ErrPartiallyExecuted       = errors.New("PARTIALLY_EXECUTED")
 	ErrUnsupportedBiRPC        = errors.New("UNSUPPORTED_BIRPC")
 )
-var logger *syslog.Writer
+
+var logger logWriter
+
+type logWriter interface {
+	Alert(m string) error
+	Close() error
+	Crit(m string) error
+	Debug(m string) error
+	Emerg(m string) error
+	Err(m string) error
+	Info(m string) error
+	Notice(m string) error
+	Warning(m string) error
+	Write(b []byte) (int, error)
+}
 
 func init() {
 	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
