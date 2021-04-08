@@ -1100,12 +1100,3 @@ func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
 	}
 }
-
-// func TestRPCClientloadTLSConfig2(t *testing.T) {
-// 	clientCrt := ""
-// 	clientKey := ""
-// 	caPath := ""
-
-// 	rcv, err := loadTLSConfig(clientCrt, clientKey, caPath)
-// 	fmt.Println(rcv, err)
-// }
