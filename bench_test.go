@@ -1,13 +1,13 @@
 package rpcclient
 
 import (
-	"context"
 	"io"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/cgrates/rpc"
+	"github.com/cgrates/rpc/context"
 	"github.com/cgrates/rpc/jsonrpc"
 )
 

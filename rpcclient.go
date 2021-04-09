@@ -20,7 +20,6 @@ package rpcclient
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -39,6 +38,7 @@ import (
 	"time"
 
 	"github.com/cgrates/rpc"
+	"github.com/cgrates/rpc/context"
 	"github.com/cgrates/rpc/jsonrpc"
 )
 

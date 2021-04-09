@@ -1,7 +1,6 @@
 package rpcclient
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/cgrates/rpc"
+	"github.com/cgrates/rpc/context"
 )
 
 type MockRPCClient struct {
@@ -33,7 +33,7 @@ func (m *MockRPCClient) Echo(ctx context.Context, args string, reply *string) er
 
 func (m *MockRPCClient) EchoBiRPC(ctx context.Context, args string, reply *string) error {
 	*reply += m.id
-	m.cl = rpc.ClientValueFromContext(ctx)
+	m.cl = ctx.Client
 	return nil
 }
 
@@ -52,7 +52,7 @@ func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args int
 	case "nerr":
 		return rpc.ErrShutdown
 	case "callBiRPC":
-		return rpc.ClientValueFromContext(ctx).Call(ctx, "", args, reply)
+		return ctx.Client.Call(ctx, "", args, reply)
 	case "async":
 		m.used = true
 		select {
@@ -831,7 +831,9 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	}
 
 	var response string
-	p.Call(rpc.WithClient(context.Background(), p.biRPCClient), "", "", &response)
+	ctx := context.Background()
+	ctx.Client = p.biRPCClient
+	p.Call(ctx, "", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
 	}
