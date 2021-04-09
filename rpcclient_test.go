@@ -958,7 +958,7 @@ func TestRPCClientHTTPjsonCallPostFail(t *testing.T) {
 	var reply interface{}
 
 	experr := "Post \"\": unsupported protocol scheme \"\""
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -974,7 +974,7 @@ func TestRPCClientHTTPjsonCallInvalidJSON(t *testing.T) {
 	var reply interface{}
 
 	experr := "json: unsupported type: chan int"
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -994,7 +994,7 @@ func TestRPCClientHTTPjsonCallDecodeFail(t *testing.T) {
 	var reply interface{}
 
 	experr := io.EOF
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -1014,7 +1014,7 @@ func TestRPCClientHTTPjsonCallUnsynchronized(t *testing.T) {
 	var reply *string
 
 	experr := ErrReqUnsynchronized
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -1034,7 +1034,7 @@ func TestRPCClientHTTPjsonCallInvalidError(t *testing.T) {
 	var reply *string
 
 	experr := fmt.Sprintf("invalid error %v", nil)
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -1054,7 +1054,7 @@ func TestRPCClientHTTPjsonCallSpecifiedError(t *testing.T) {
 	var reply *string
 
 	experr := "specified error"
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -1074,7 +1074,7 @@ func TestRPCClientHTTPjsonCallUnspecifiedError(t *testing.T) {
 	var reply *string
 
 	experr := "unspecified error"
-	err := client.Call(serviceMethod, args, reply)
+	err := client.Call(context.TODO(), serviceMethod, args, reply)
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
@@ -1093,7 +1093,7 @@ func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
 	args := ""
 	var reply string
 
-	err := client.Call(serviceMethod, args, &reply)
+	err := client.Call(context.TODO(), serviceMethod, args, &reply)
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
