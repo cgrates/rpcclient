@@ -2,6 +2,6 @@ module github.com/cgrates/rpcclient
 
 go 1.16
 
-replace github.com/cgrates/rpc => ../rpc
+replace github.com/cgrates/birpc => ../rpc
 
-require github.com/cgrates/rpc v1.3.1-0.20210402104943-a0214560d22c
+require github.com/cgrates/birpc v1.3.1-0.20210409133703-0edbf99e3f3c
