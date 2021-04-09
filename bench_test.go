@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cgrates/rpc"
-	"github.com/cgrates/rpc/context"
-	"github.com/cgrates/rpc/jsonrpc"
+	"github.com/cgrates/birpc"
+	"github.com/cgrates/birpc/context"
+	"github.com/cgrates/birpc/jsonrpc"
 )
 
 var (
@@ -16,7 +16,7 @@ var (
 )
 
 func init() {
-	rpc.Register(&MockRPCClient{})
+	birpc.Register(&MockRPCClient{})
 }
 
 func startRPCSertver(addr string) (err error) {
