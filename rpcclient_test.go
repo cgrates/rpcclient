@@ -26,12 +26,12 @@ type MockRPCClient struct {
 	cl birpc.ClientConnector
 }
 
-func (m *MockRPCClient) Echo(ctx context.Context, args string, reply *string) error {
+func (m *MockRPCClient) Echo(ctx *context.Context, args string, reply *string) error {
 	*reply += m.id
 	return nil
 }
 
-func (m *MockRPCClient) EchoBiRPC(ctx context.Context, args string, reply *string) error {
+func (m *MockRPCClient) EchoBiRPC(ctx *context.Context, args string, reply *string) error {
 	*reply += m.id
 	m.cl = ctx.Client
 	return nil
@@ -43,7 +43,7 @@ func (m *MockRPCClient) Handlers() map[string]interface{} {
 	}
 }
 
-func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+func (m *MockRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
 	switch m.id {
 	case "offline":
 		return ErrReqUnsynchronized
@@ -611,25 +611,25 @@ func TestNewRPCClient(t *testing.T) {
 	}
 	internalChan = make(chan birpc.ClientConnector, 1)
 	if _, err := NewRPCClient("", "", false, "", "", "", 5, 10,
-		time.Millisecond, time.Millisecond, InternalRPC, internalChan, false, nil); err != ErrDisconnected {
-		t.Errorf("Expected error: %s received: %v", ErrDisconnected, err)
+		time.Millisecond, time.Millisecond, InternalRPC, internalChan, false, nil); err != context.DeadlineExceeded {
+		t.Errorf("Expected error: %s received: %v", context.DeadlineExceeded, err)
 	}
 	if client, err := NewRPCClient("", "", false, "", "", "", 5, 10,
 		time.Millisecond, time.Millisecond, HTTPjson, internalChan, false, nil); err != nil {
 		t.Errorf("Expected to create the http connection received error: %v", err)
-	} else if err = client.reconnect(); err != nil {
+	} else if err = client.reconnect(context.Background()); err != nil {
 		t.Error(err)
 	} else if !client.isConnected() {
 		t.Errorf("Expected the connection to be started")
 	}
 
 	// mock the server
-	addr := "localhost:2012"
+	addr := "localhost:0"
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Error(err)
 	}
-
+	addr = l.Addr().String()
 	client, err = NewRPCClient("tcp", addr, false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, JSONrpc, nil, false, nil)
 	if err != nil {
@@ -661,7 +661,7 @@ func TestNewRPCClient(t *testing.T) {
 	} else if !client.isConnected() {
 		t.Errorf("Expected to start the connection")
 	}
-	if err = client.reconnect(); err != nil {
+	if err = client.reconnect(context.Background()); err != nil {
 		t.Error(err)
 	} else if !client.isConnected() {
 		t.Errorf("Expected to restart the connection")
@@ -678,7 +678,7 @@ func TestNewRPCClient(t *testing.T) {
 		t.Errorf("Expected to stop the connection after disconnect")
 	}
 	l.Close()
-	if err = client.reconnect(); err != ErrFailedReconnect {
+	if err = client.reconnect(context.Background()); err != ErrFailedReconnect {
 		t.Errorf("Expected error: %s received: %v", ErrFailedReconnect, err)
 	}
 	if client.isConnected() {
@@ -812,7 +812,7 @@ func TestRPCClientInternalConnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = rpcc.connect(); err != nil {
+	if err = rpcc.connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -821,18 +821,19 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	internalChan := make(chan birpc.ClientConnector, 1)
 	server := &MockRPCClient{id: "callBiRPC"}
 	internalChan <- server
+	birpcClient := &MockRPCClient{id: "2"}
 	p, err := NewRPCClient("", "", false, "", "", "", 5, 10,
-		time.Millisecond, 50*time.Millisecond, BiRPCInternal, internalChan, false, &MockRPCClient{id: "2"})
+		time.Millisecond, 50*time.Millisecond, BiRPCInternal, internalChan, false, birpcClient)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = p.connect(); err != nil {
+	if err = p.connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	var response string
 	ctx := context.Background()
-	ctx.Client = p.biRPCClient
+	ctx.Client = birpcClient
 	p.Call(ctx, "", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
@@ -842,8 +843,8 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	internalChan = make(chan birpc.ClientConnector, 1)
 	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
 		time.Millisecond, 0, BiRPCInternal, internalChan, false, &MockRPCClient{id: "2"})
-	if err != ErrDisconnected {
-		t.Errorf("Expected error %s received:%v ", ErrDisconnected, err)
+	if err != context.DeadlineExceeded {
+		t.Errorf("Expected error %s received:%v ", context.DeadlineExceeded, err)
 	}
 
 	internalChan <- nil
@@ -915,7 +916,7 @@ func TestRPCClientconnectTLSTrue(t *testing.T) {
 		codec: HTTPjson,
 	}
 
-	err := client.connect()
+	err := client.connect(context.Background())
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -927,7 +928,7 @@ func TestRPCClientconnectTLSFalse(t *testing.T) {
 		codec: HTTPjson,
 	}
 
-	err := client.connect()
+	err := client.connect(context.Background())
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
@@ -942,7 +943,7 @@ func TestRPCClientconnectInvalidPath(t *testing.T) {
 	}
 
 	experr := "open invalid: no such file or directory"
-	err := client.connect()
+	err := client.connect(context.Background())
 
 	if err == nil || err.Error() != experr {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", experr, err)
