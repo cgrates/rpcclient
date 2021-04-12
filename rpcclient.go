@@ -116,7 +116,7 @@ func NewRPCClient(transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalChan chan birpc.ClientConnector, lazyConnect bool,
-	biRPCClient birpc.ClientConnector) (rpcClient *RPCClient, err error) {
+	biRPCClient interface{}) (rpcClient *RPCClient, err error) {
 	switch codec {
 	case InternalRPC:
 		if reflect.ValueOf(internalChan).IsNil() {
@@ -157,11 +157,14 @@ func NewRPCClient(transport, addr string, tls bool,
 	}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
-		err = rpcClient.connect()
-		if err == nil { //Connected so no need to reiterate
-			break
+		ctx, cancel := context.WithTimeout(context.Background(), rpcClient.connTimeout)
+		err = rpcClient.connect(ctx)
+		cancel()        // cancel ctx so we do not have any goroutine hanging
+		if err != nil { // Cound not connect, retry
+			time.Sleep(delay())
+			continue
 		}
-		time.Sleep(delay())
+		return // No error on connect, succcess
 	}
 	return
 }
@@ -181,7 +184,7 @@ type RPCClient struct {
 	connection   birpc.ClientConnector
 	connMux      sync.RWMutex // protects connection
 	internalChan chan birpc.ClientConnector
-	biRPCClient  birpc.ClientConnector
+	biRPCClient  interface{}
 }
 
 func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err error) {
@@ -219,7 +222,7 @@ func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err
 	return
 }
 
-func (client *RPCClient) connect() (err error) {
+func (client *RPCClient) connect(ctx *context.Context) (err error) {
 	client.connMux.Lock()
 	defer client.connMux.Unlock()
 	var newClient func(conn io.ReadWriteCloser) birpc.ClientConnector
@@ -234,8 +237,8 @@ func (client *RPCClient) connect() (err error) {
 			if client.connection == nil {
 				return ErrDisconnected
 			}
-		case <-time.After(client.connTimeout):
-			return ErrDisconnected
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 		return
 	case HTTPjson:
@@ -270,8 +273,8 @@ func (client *RPCClient) connect() (err error) {
 			if client.connection == nil {
 				return ErrDisconnected
 			}
-		case <-time.After(client.connTimeout):
-			return ErrDisconnected
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 		return
 	case BiRPCJSON:
@@ -330,27 +333,38 @@ func (client *RPCClient) disconnect() (err error) {
 	return
 }
 
-func (client *RPCClient) reconnect() (err error) {
+func (client *RPCClient) reconnect(ctx *context.Context) (err error) {
 	client.disconnect()           // make sure we have cleared the connection so it can be garbage collected
 	if client.codec == HTTPjson { // http client has automatic reconnects in place
-		return client.connect()
+		return client.connect(ctx)
 	}
 	delay := Fib()
 	for i := 1; client.reconnects == -1 || i <= client.reconnects; i++ { // Maximum reconnects reached, -1 for infinite reconnects
-		if err = client.connect(); err != nil { // No error on connect, succcess
-			time.Sleep(delay()) // Cound not reconnect, retry
-			continue
+		ctx2, cancel := context.WithTimeout(ctx, client.connTimeout)
+		err = client.connect(ctx2)
+		cancel()        // cancel ctx2 so we do not have any goroutine hanging
+		if err != nil { // Cound not reconnect, retry
+			tm := time.NewTimer(delay())
+			select {
+			case <-ctx.Done(): // it was called from Call so we have a reply timeout
+				tm.Stop() // stop the timer
+				return ctx.Err()
+			case <-tm.C:
+				continue
+			}
 		}
-		return
+		return // No error on connect, succcess
 	}
 	return ErrFailedReconnect
 }
 
 // Call the method needed to implement ClientConnector
-func (client *RPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	if args == nil || reply == nil || reflect.ValueOf(reply).IsNil() { // panics  on zero Value if not checked
 		return fmt.Errorf("nil rpc in argument method: %s in: %v out: %v", serviceMethod, args, reply)
 	}
+	ctx2, cancel := context.WithTimeout(ctx, client.replyTimeout)
+	defer cancel()
 	if client.codec == InternalRPC { // only try to clone on *internal for the rest the arguments are marshaled so no clone needed
 		if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
 			if args, err = argsClnIface.RPCClone(); err != nil {
@@ -358,8 +372,6 @@ func (client *RPCClient) Call(ctx context.Context, serviceMethod string, args in
 			}
 		}
 	}
-	ctx2, cancel := context.WithTimeout(ctx, client.replyTimeout)
-	defer cancel()
 	err = client.call(ctx2, serviceMethod, args, reply)
 	if !IsNetworkError(err) ||
 		err == context.DeadlineExceeded ||
@@ -367,13 +379,13 @@ func (client *RPCClient) Call(ctx context.Context, serviceMethod string, args in
 		client.reconnects == 0 {
 		return
 	}
-	if errReconnect := client.reconnect(); errReconnect != nil {
+	if errReconnect := client.reconnect(ctx); errReconnect != nil {
 		return
 	}
 	return client.call(ctx2, serviceMethod, args, reply)
 }
 
-func (client *RPCClient) call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *RPCClient) call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	client.connMux.RLock()
 	if client.connection == nil {
 		err = ErrDisconnected
@@ -404,7 +416,7 @@ type HTTPjsonRPCClient struct {
 }
 
 // Call the method needed to implement ClientConnector
-func (client *HTTPjsonRPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (client *HTTPjsonRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	client.id++
 	id := client.id
 	var data []byte
@@ -471,7 +483,7 @@ func (pool *RPCPool) AddClient(rcc birpc.ClientConnector) {
 }
 
 // Call the method needed to implement birpc.ClientConnector
-func (pool *RPCPool) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	switch pool.transmissionType {
 	case PoolBroadcast:
 		replyChan := make(chan *rpcReplyError, len(pool.connections))
@@ -644,7 +656,7 @@ func NewRPCParallelClientPool(transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalChan chan birpc.ClientConnector, maxCounter int64, initConns bool,
-	biRPCClient birpc.ClientConnector) (rpcClient *RPCParallelClientPool, err error) {
+	biRPCClient interface{}) (rpcClient *RPCParallelClientPool, err error) {
 	if codec != InternalRPC && codec != JSONrpc && codec != HTTPjson && codec != GOBrpc {
 		err = ErrUnsupportedCodec
 		return
@@ -690,7 +702,7 @@ type RPCParallelClientPool struct {
 	replyTimeout    time.Duration
 	codec           string // JSONrpc or GOBrpc
 	internalChan    chan birpc.ClientConnector
-	biRPCClient     birpc.ClientConnector
+	biRPCClient     interface{}
 
 	connectionsChan chan birpc.ClientConnector
 	counterMux      sync.RWMutex
@@ -698,7 +710,7 @@ type RPCParallelClientPool struct {
 }
 
 // Call the method needed to implement birpc.ClientConnector
-func (pool *RPCParallelClientPool) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
+func (pool *RPCParallelClientPool) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
 	var conn birpc.ClientConnector
 	select {
 	case conn = <-pool.connectionsChan:
