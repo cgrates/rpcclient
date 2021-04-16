@@ -112,7 +112,7 @@ func Fib() func() time.Duration {
 }
 
 // NewRPCClient creates a client based on the config
-func NewRPCClient(transport, addr string, tls bool,
+func NewRPCClient(ctx *context.Context, transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalChan chan birpc.ClientConnector, lazyConnect bool,
@@ -157,8 +157,8 @@ func NewRPCClient(transport, addr string, tls bool,
 	}
 	delay := Fib()
 	for i := 0; i < connectAttempts; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), rpcClient.connTimeout)
-		err = rpcClient.connect(ctx)
+		connCtx, cancel := context.WithTimeout(ctx, rpcClient.connTimeout)
+		err = rpcClient.connect(connCtx)
 		cancel()        // cancel ctx so we do not have any goroutine hanging
 		if err != nil { // Cound not connect, retry
 			time.Sleep(delay())
@@ -652,7 +652,7 @@ func IsNetworkError(err error) bool {
 }
 
 // NewRPCParallelClientPool returns a new RPCParallelClientPool
-func NewRPCParallelClientPool(transport, addr string, tls bool,
+func NewRPCParallelClientPool(ctx *context.Context, transport, addr string, tls bool,
 	keyPath, certPath, caPath string, connectAttempts, reconnects int,
 	connTimeout, replyTimeout time.Duration, codec string,
 	internalChan chan birpc.ClientConnector, maxCounter int64, initConns bool,
@@ -683,7 +683,7 @@ func NewRPCParallelClientPool(transport, addr string, tls bool,
 		connectionsChan: make(chan birpc.ClientConnector, maxCounter),
 	}
 	if initConns {
-		err = rpcClient.initConns()
+		err = rpcClient.initConns(ctx)
 	}
 	return
 }
@@ -723,7 +723,7 @@ func (pool *RPCParallelClientPool) Call(ctx *context.Context, serviceMethod stri
 		} else {
 			pool.counter++
 			pool.counterMux.Unlock()
-			if conn, err = NewRPCClient(pool.transport, pool.address, pool.tls,
+			if conn, err = NewRPCClient(ctx, pool.transport, pool.address, pool.tls,
 				pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
 				pool.connTimeout, pool.replyTimeout, pool.codec,
 				pool.internalChan, false, pool.biRPCClient); err != nil {
@@ -739,10 +739,10 @@ func (pool *RPCParallelClientPool) Call(ctx *context.Context, serviceMethod stri
 	return
 }
 
-func (pool *RPCParallelClientPool) initConns() (err error) {
+func (pool *RPCParallelClientPool) initConns(ctx *context.Context) (err error) {
 	for pool.counter = 0; pool.counter < int64(cap(pool.connectionsChan)); pool.counter++ {
 		var conn birpc.ClientConnector
-		if conn, err = NewRPCClient(pool.transport, pool.address, pool.tls,
+		if conn, err = NewRPCClient(ctx, pool.transport, pool.address, pool.tls,
 			pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
 			pool.connTimeout, pool.replyTimeout, pool.codec,
 			pool.internalChan, false, pool.biRPCClient); err != nil {

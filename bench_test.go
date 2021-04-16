@@ -35,7 +35,7 @@ func startRPCSertver(addr string) (err error) {
 func BenchmarkNewRPCParallelClientPoolWithoutInit(b *testing.B) {
 	addr := "localhost:2012"
 	go startRPCSertver(addr)
-	client, err := NewRPCParallelClientPool("tcp", addr, false,
+	client, err := NewRPCParallelClientPool(context.Background(), "tcp", addr, false,
 		"", "", "", 5, 5, 5*time.Millisecond, 60*time.Millisecond, JSONrpc,
 		nil, noClinets, false, nil)
 	if err != nil {
@@ -56,7 +56,7 @@ func BenchmarkNewRPCParallelClientPoolWithoutInit(b *testing.B) {
 func BenchmarkNewRPCParallelClientPoolWithInit(b *testing.B) {
 	addr := "localhost:2013"
 	go startRPCSertver(addr)
-	client, err := NewRPCParallelClientPool("tcp", addr, false,
+	client, err := NewRPCParallelClientPool(context.Background(), "tcp", addr, false,
 		"", "", "", 5, 5, 5*time.Millisecond, 60*time.Millisecond, JSONrpc,
 		nil, noClinets, true, nil)
 	if err != nil {
