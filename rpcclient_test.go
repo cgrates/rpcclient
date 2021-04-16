@@ -359,7 +359,7 @@ func TestPoolFirstPositive(t *testing.T) {
 func TestNewRpcParallelClientPool(t *testing.T) {
 	internalChan := make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "1"}
-	rpcppool, err := NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err := NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 2, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -384,7 +384,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 	} else if len(rpcppool.connectionsChan) != 1 {
 		t.Errorf("Expected: 1 received: %v", len(rpcppool.connectionsChan))
 	}
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 2, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -394,13 +394,13 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, "Not a supported codec", internalChan, 2, false, nil)
 	if err != ErrUnsupportedCodec {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, nil, 2, false, nil)
 	if err != ErrInternallyDisconnected {
 		t.Errorf("Expected error: %s received: %v", ErrInternallyDisconnected, err)
@@ -409,7 +409,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 	close(internalChan)
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "sleep"}
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 70*time.Millisecond, InternalRPC, internalChan, 2, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -432,7 +432,7 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "1"}
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 3, true, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -442,13 +442,13 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Errorf("Expected: 1 received: %v", len(rpcppool.connectionsChan))
 	}
 
-	rpcppool, err = NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 3, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rpcppool.codec = "Not a supported codec"
-	if err = rpcppool.initConns(); err != ErrUnsupportedCodec {
+	if err = rpcppool.initConns(context.Background()); err != ErrUnsupportedCodec {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 }
@@ -500,7 +500,7 @@ func TestNewRPCPool(t *testing.T) {
 	}
 	internalChan := make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "1"}
-	client, err := NewRPCParallelClientPool("", "", false, "", "", "", 5, 10,
+	client, err := NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, 2, false, nil)
 	if err != nil {
 		t.Error(err)
@@ -534,11 +534,11 @@ func TestFib(t *testing.T) {
 }
 
 func TestNewRPCClient(t *testing.T) {
-	if _, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	if _, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, "Not a supported codec", nil, true, nil); err != ErrUnsupportedCodec {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
-	if _, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	if _, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, nil, true, nil); err != ErrInternallyDisconnected {
 		t.Errorf("Expected error: %s received: %v", ErrInternallyDisconnected, err)
 	}
@@ -558,7 +558,7 @@ func TestNewRPCClient(t *testing.T) {
 		codec:        JSONrpc,
 		internalChan: nil,
 	}
-	client, err := NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
+	client, err := NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, JSONrpc, nil, true, nil)
 	if err != nil {
 		t.Error(err)
@@ -597,7 +597,7 @@ func TestNewRPCClient(t *testing.T) {
 	if client.isConnected() {
 		t.Errorf("Expected to not start the connection if lazzyConnect is on true")
 	}
-	_, err = NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, JSONrpc, nil, false, nil)
 	if err == nil {
 		t.Errorf("Expected connection error received:%v", err)
@@ -605,16 +605,16 @@ func TestNewRPCClient(t *testing.T) {
 
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- nil
-	if _, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	if _, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, false, nil); err != ErrDisconnected {
 		t.Errorf("Expected error: %s received: %v", ErrDisconnected, err)
 	}
 	internalChan = make(chan birpc.ClientConnector, 1)
-	if _, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	if _, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, time.Millisecond, InternalRPC, internalChan, false, nil); err != context.DeadlineExceeded {
 		t.Errorf("Expected error: %s received: %v", context.DeadlineExceeded, err)
 	}
-	if client, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	if client, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, time.Millisecond, HTTPjson, internalChan, false, nil); err != nil {
 		t.Errorf("Expected to create the http connection received error: %v", err)
 	} else if err = client.reconnect(context.Background()); err != nil {
@@ -630,7 +630,7 @@ func TestNewRPCClient(t *testing.T) {
 		t.Error(err)
 	}
 	addr = l.Addr().String()
-	client, err = NewRPCClient("tcp", addr, false, "", "", "", 5, 10,
+	client, err = NewRPCClient(context.Background(), "tcp", addr, false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, JSONrpc, nil, false, nil)
 	if err != nil {
 		t.Error(err)
@@ -642,7 +642,7 @@ func TestNewRPCClient(t *testing.T) {
 		t.Errorf("Expected to stop the connection after disconnect")
 	}
 
-	client, err = NewRPCClient("tcp", addr, false, "", "", "", 5, 10,
+	client, err = NewRPCClient(context.Background(), "tcp", addr, false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, BiRPCJSON, nil, false, new(MockRPCClient))
 	if err != nil {
 		t.Error(err)
@@ -654,7 +654,7 @@ func TestNewRPCClient(t *testing.T) {
 		t.Errorf("Expected to stop the connection after disconnect")
 	}
 
-	client, err = NewRPCClient("tcp", addr, false, "", "", "", 5, 10,
+	client, err = NewRPCClient(context.Background(), "tcp", addr, false, "", "", "", 5, 10,
 		time.Millisecond, time.Millisecond, GOBrpc, nil, false, nil)
 	if err != nil {
 		t.Error(err)
@@ -666,7 +666,7 @@ func TestNewRPCClient(t *testing.T) {
 	} else if !client.isConnected() {
 		t.Errorf("Expected to restart the connection")
 	}
-	client, err = NewRPCClient("tcp", addr, false, "", "", "", 5, 10,
+	client, err = NewRPCClient(context.Background(), "tcp", addr, false, "", "", "", 5, 10,
 		5*time.Millisecond, 5*time.Millisecond, BiRPCGOB, nil, false, new(MockRPCClient))
 	if err != nil {
 		t.Error(err)
@@ -697,7 +697,7 @@ func (c cloner) RPCClone() (interface{}, error) {
 func TestRPCClientCall(t *testing.T) {
 	internalChan := make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "1"}
-	client, err := NewRPCClient("transport", "addr", false, "", "", "", 5, 10,
+	client, err := NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 5, 10,
 		10*time.Millisecond, 5*time.Millisecond, InternalRPC, internalChan, true, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -729,7 +729,7 @@ func TestRPCClientCall(t *testing.T) {
 
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- nil
-	client, err = NewRPCClient("transport", "addr", false, "", "", "", 1, 1,
+	client, err = NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 1, 1,
 		10*time.Millisecond, 5*time.Millisecond, InternalRPC, internalChan, true, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -740,7 +740,7 @@ func TestRPCClientCall(t *testing.T) {
 	}
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "sleep"}
-	client, err = NewRPCClient("transport", "addr", false, "", "", "", 1, 1,
+	client, err = NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 1, 1,
 		10*time.Millisecond, 5*time.Millisecond, InternalRPC, internalChan, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -753,7 +753,7 @@ func TestRPCClientCall(t *testing.T) {
 func TestRPCClientCallTimeout(t *testing.T) {
 	internalChan := make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "sleep"}
-	cl, err := NewRPCClient("", "", false, "", "", "", 1, 1,
+	cl, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 1, 1,
 		time.Millisecond, 25*time.Millisecond, InternalRPC, internalChan, true, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -807,7 +807,7 @@ func TestRPCPoolBroadcastAsync(t *testing.T) {
 func TestRPCClientInternalConnect(t *testing.T) {
 	internalChan := make(chan birpc.ClientConnector, 1)
 	internalChan <- &MockRPCClient{id: "1"}
-	rpcc, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	rpcc, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, InternalRPC, internalChan, false, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -822,7 +822,7 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	server := &MockRPCClient{id: "callBiRPC"}
 	internalChan <- server
 	birpcClient := &MockRPCClient{id: "2"}
-	p, err := NewRPCClient("", "", false, "", "", "", 5, 10,
+	p, err := NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, BiRPCInternal, internalChan, false, birpcClient)
 	if err != nil {
 		t.Fatal(err)
@@ -841,14 +841,14 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	close(internalChan)
 
 	internalChan = make(chan birpc.ClientConnector, 1)
-	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 0, BiRPCInternal, internalChan, false, &MockRPCClient{id: "2"})
 	if err != context.DeadlineExceeded {
 		t.Errorf("Expected error %s received:%v ", context.DeadlineExceeded, err)
 	}
 
 	internalChan <- nil
-	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 50*time.Millisecond, BiRPCInternal, internalChan, false, &MockRPCClient{id: "2"})
 	if err != ErrDisconnected {
 		t.Errorf("Expected error %s received:%v ", ErrDisconnected, err)
@@ -859,19 +859,19 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	internalChan = make(chan birpc.ClientConnector, 1)
 	internalChan <- &RPCParallelClientPool{}
 
-	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 0, BiRPCJSON, internalChan, false, nil)
 	if err != ErrUnsupportedBiRPC {
 		t.Errorf("Expected error %s received:%v ", ErrUnsupportedBiRPC, err)
 	}
 
-	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 0, BiRPCInternal, internalChan, false, nil)
 	if err != ErrUnsupportedBiRPC {
 		t.Errorf("Expected error %s received:%v ", ErrUnsupportedBiRPC, err)
 	}
 
-	_, err = NewRPCClient("", "", false, "", "", "", 5, 10,
+	_, err = NewRPCClient(context.Background(), "", "", false, "", "", "", 5, 10,
 		time.Millisecond, 0, BiRPCInternal, nil, false, nil)
 	if err != ErrInternallyDisconnected {
 		t.Errorf("Expected error %s received:%v ", ErrInternallyDisconnected, err)
