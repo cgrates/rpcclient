@@ -308,10 +308,16 @@ func (client *RPCClient) newNetConn() (netconn io.ReadWriteCloser, err error) {
 	return net.DialTimeout(client.transport, client.address, client.connTimeout)
 }
 
-func (client *RPCClient) isConnected() bool {
+// getConn returns the connection
+func (client *RPCClient) getConn() (c birpc.ClientConnector) {
 	client.connMux.RLock()
-	defer client.connMux.RUnlock()
-	return client.connection != nil
+	c = client.connection // the operations on connections need to be thread safe
+	client.connMux.RUnlock()
+	return
+}
+
+func (client *RPCClient) isConnected() bool {
+	return client.getConn() != nil
 }
 
 func (client *RPCClient) disconnect() (err error) {
@@ -360,15 +366,14 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 	}
 	ctx2, cancel := context.WithTimeout(ctx, client.replyTimeout)
 	defer cancel()
-	if client.codec == InternalRPC { // only try to clone on *internal for the rest the arguments are marshaled so no clone needed
+	if client.codec == InternalRPC || client.codec == BiRPCInternal { // only try to clone on *internal for the rest the arguments are marshaled so no clone needed
 		if argsClnIface, clnable := args.(RPCCloner); clnable { // try cloning to avoid concurrency
 			if args, err = argsClnIface.RPCClone(); err != nil {
 				return
 			}
 		}
 	}
-	err = client.call(ctx2, serviceMethod, args, reply)
-	if !IsNetworkError(err) ||
+	if err = client.call(ctx2, serviceMethod, args, reply); !IsNetworkError(err) ||
 		err == context.DeadlineExceeded ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		client.reconnects == 0 {
@@ -381,14 +386,11 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 }
 
 func (client *RPCClient) call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
-	client.connMux.RLock()
-	if client.connection == nil {
-		err = ErrDisconnected
-	} else {
-		err = client.connection.Call(ctx, serviceMethod, args, reply)
+	conn := client.getConn() // only protect to take the correct connection not to block until the operation on connection is done
+	if conn == nil {
+		return ErrDisconnected
 	}
-	client.connMux.RUnlock()
-	return
+	return conn.Call(ctx, serviceMethod, args, reply)
 }
 
 // RPCCloner is an interface for objects to clone parts of themselves which are affected by concurrency at the time of RPC call
