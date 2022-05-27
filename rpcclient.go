@@ -102,21 +102,12 @@ func init() {
 	logger, _ = syslog.New(syslog.LOG_INFO, "RPCClient") // If we need to report anything to syslog
 }
 
-// Fib returns successive Fibonacci numbers.
-func Fib() func() time.Duration {
-	a, b := 0, 1
-	return func() time.Duration {
-		a, b = b, a+b
-		return time.Duration(a*10) * time.Millisecond
-	}
-}
-
 // NewRPCClient creates a client based on the config
-func NewRPCClient(ctx *context.Context, transport, addr string, tls bool,
-	keyPath, certPath, caPath string, connectAttempts, reconnects int,
-	connTimeout, replyTimeout time.Duration, codec string,
-	internalChan chan birpc.ClientConnector, lazyConnect bool,
-	biRPCClient interface{}) (rpcClient *RPCClient, err error) {
+func NewRPCClient(ctx *context.Context, transport, addr string, tls bool, keyPath, certPath,
+	caPath string, connectAttempts, reconnects int, maxReconnectInterval time.Duration,
+	delayFunc func(time.Duration, time.Duration) func() time.Duration, connTimeout,
+	replyTimeout time.Duration, codec string, internalChan chan birpc.ClientConnector,
+	lazyConnect bool, biRPCClient interface{}) (rpcClient *RPCClient, err error) {
 	switch codec {
 	case InternalRPC:
 		if reflect.ValueOf(internalChan).IsNil() {
@@ -139,23 +130,25 @@ func NewRPCClient(ctx *context.Context, transport, addr string, tls bool,
 		return
 	}
 	rpcClient = &RPCClient{
-		transport:    transport,
-		tls:          tls,
-		address:      addr,
-		keyPath:      keyPath,
-		certPath:     certPath,
-		caPath:       caPath,
-		reconnects:   reconnects,
-		connTimeout:  connTimeout,
-		replyTimeout: replyTimeout,
-		codec:        codec,
-		internalChan: internalChan,
-		biRPCClient:  biRPCClient,
+		transport:            transport,
+		tls:                  tls,
+		address:              addr,
+		keyPath:              keyPath,
+		certPath:             certPath,
+		caPath:               caPath,
+		reconnects:           reconnects,
+		maxReconnectInterval: maxReconnectInterval,
+		connTimeout:          connTimeout,
+		replyTimeout:         replyTimeout,
+		delayFunc:            delayFunc,
+		codec:                codec,
+		internalChan:         internalChan,
+		biRPCClient:          biRPCClient,
 	}
 	if lazyConnect {
 		return
 	}
-	delay := Fib()
+	delay := rpcClient.delayFunc(10*time.Millisecond, 0)
 	for i := 0; i < connectAttempts; i++ {
 		connCtx, cancel := context.WithTimeout(ctx, rpcClient.connTimeout)
 		err = rpcClient.connect(connCtx)
@@ -171,20 +164,22 @@ func NewRPCClient(ctx *context.Context, transport, addr string, tls bool,
 
 // RPCClient implements ClientConnector
 type RPCClient struct {
-	transport    string
-	tls          bool
-	address      string
-	keyPath      string
-	certPath     string
-	caPath       string
-	reconnects   int
-	connTimeout  time.Duration
-	replyTimeout time.Duration
-	codec        string // JSONrpc or GOBrpc
-	connection   birpc.ClientConnector
-	connMux      sync.RWMutex // protects connection
-	internalChan chan birpc.ClientConnector
-	biRPCClient  interface{}
+	transport            string
+	tls                  bool
+	address              string
+	keyPath              string
+	certPath             string
+	caPath               string
+	reconnects           int
+	maxReconnectInterval time.Duration
+	connTimeout          time.Duration
+	replyTimeout         time.Duration
+	delayFunc            func(time.Duration, time.Duration) func() time.Duration // used to create/reset the delay function
+	codec                string                                                  // JSONrpc or GOBrpc
+	connection           birpc.ClientConnector
+	connMux              sync.RWMutex // protects connection
+	internalChan         chan birpc.ClientConnector
+	biRPCClient          interface{}
 }
 
 func loadTLSConfig(clientCrt, clientKey, caPath string) (config *tls.Config, err error) {
@@ -338,7 +333,7 @@ func (client *RPCClient) reconnect(ctx *context.Context) (err error) {
 	if client.codec == HTTPjson { // http client has automatic reconnects in place
 		return client.connect(ctx)
 	}
-	delay := Fib()
+	delay := client.delayFunc(10*time.Millisecond, client.maxReconnectInterval)
 	for i := 1; client.reconnects == -1 || i <= client.reconnects; i++ { // Maximum reconnects reached, -1 for infinite reconnects
 		ctx2, cancel := context.WithTimeout(ctx, client.connTimeout)
 		err = client.connect(ctx2)
@@ -652,11 +647,11 @@ func IsNetworkError(err error) bool {
 }
 
 // NewRPCParallelClientPool returns a new RPCParallelClientPool
-func NewRPCParallelClientPool(ctx *context.Context, transport, addr string, tls bool,
-	keyPath, certPath, caPath string, connectAttempts, reconnects int,
-	connTimeout, replyTimeout time.Duration, codec string,
-	internalChan chan birpc.ClientConnector, maxCounter int64, initConns bool,
-	biRPCClient interface{}) (rpcClient *RPCParallelClientPool, err error) {
+func NewRPCParallelClientPool(ctx *context.Context, transport, addr string, tls bool, keyPath,
+	certPath, caPath string, connectAttempts, reconnects int, maxReconnectInterval time.Duration,
+	delayFunc func(time.Duration, time.Duration) func() time.Duration, connTimeout,
+	replyTimeout time.Duration, codec string, internalChan chan birpc.ClientConnector, maxCounter int64,
+	initConns bool, biRPCClient interface{}) (rpcClient *RPCParallelClientPool, err error) {
 	if codec != InternalRPC && codec != JSONrpc && codec != HTTPjson && codec != GOBrpc {
 		err = ErrUnsupportedCodec
 		return
@@ -666,19 +661,21 @@ func NewRPCParallelClientPool(ctx *context.Context, transport, addr string, tls 
 		return
 	}
 	rpcClient = &RPCParallelClientPool{
-		transport:       transport,
-		tls:             tls,
-		address:         addr,
-		keyPath:         keyPath,
-		certPath:        certPath,
-		caPath:          caPath,
-		connectAttempts: connectAttempts,
-		reconnects:      reconnects,
-		connTimeout:     connTimeout,
-		replyTimeout:    replyTimeout,
-		codec:           codec,
-		internalChan:    internalChan,
-		biRPCClient:     biRPCClient,
+		transport:            transport,
+		tls:                  tls,
+		address:              addr,
+		keyPath:              keyPath,
+		certPath:             certPath,
+		caPath:               caPath,
+		connectAttempts:      connectAttempts,
+		reconnects:           reconnects,
+		maxReconnectInterval: maxReconnectInterval,
+		connTimeout:          connTimeout,
+		replyTimeout:         replyTimeout,
+		delayFunc:            delayFunc,
+		codec:                codec,
+		internalChan:         internalChan,
+		biRPCClient:          biRPCClient,
 
 		connectionsChan: make(chan birpc.ClientConnector, maxCounter),
 	}
@@ -690,19 +687,21 @@ func NewRPCParallelClientPool(ctx *context.Context, transport, addr string, tls 
 
 // RPCParallelClientPool implements ClientConnector
 type RPCParallelClientPool struct {
-	transport       string
-	tls             bool
-	address         string
-	keyPath         string
-	certPath        string
-	caPath          string
-	reconnects      int
-	connectAttempts int
-	connTimeout     time.Duration
-	replyTimeout    time.Duration
-	codec           string // JSONrpc or GOBrpc
-	internalChan    chan birpc.ClientConnector
-	biRPCClient     interface{}
+	transport            string
+	tls                  bool
+	address              string
+	keyPath              string
+	certPath             string
+	caPath               string
+	connectAttempts      int
+	reconnects           int
+	maxReconnectInterval time.Duration
+	connTimeout          time.Duration
+	replyTimeout         time.Duration
+	delayFunc            func(time.Duration, time.Duration) func() time.Duration
+	codec                string // JSONrpc or GOBrpc
+	internalChan         chan birpc.ClientConnector
+	biRPCClient          interface{}
 
 	connectionsChan chan birpc.ClientConnector
 	counterMux      sync.RWMutex
@@ -725,8 +724,8 @@ func (pool *RPCParallelClientPool) Call(ctx *context.Context, serviceMethod stri
 			pool.counterMux.Unlock()
 			if conn, err = NewRPCClient(ctx, pool.transport, pool.address, pool.tls,
 				pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
-				pool.connTimeout, pool.replyTimeout, pool.codec,
-				pool.internalChan, false, pool.biRPCClient); err != nil {
+				pool.maxReconnectInterval, pool.delayFunc, pool.connTimeout, pool.replyTimeout,
+				pool.codec, pool.internalChan, false, pool.biRPCClient); err != nil {
 				pool.counterMux.Lock()
 				pool.counter-- // remove the conter if the connection was never created
 				pool.counterMux.Unlock()
@@ -744,8 +743,8 @@ func (pool *RPCParallelClientPool) initConns(ctx *context.Context) (err error) {
 		var conn birpc.ClientConnector
 		if conn, err = NewRPCClient(ctx, pool.transport, pool.address, pool.tls,
 			pool.keyPath, pool.certPath, pool.caPath, pool.connectAttempts, pool.reconnects,
-			pool.connTimeout, pool.replyTimeout, pool.codec,
-			pool.internalChan, false, pool.biRPCClient); err != nil {
+			pool.maxReconnectInterval, pool.delayFunc, pool.connTimeout, pool.replyTimeout,
+			pool.codec, pool.internalChan, false, pool.biRPCClient); err != nil {
 			return
 		}
 		pool.connectionsChan <- conn
