@@ -56,15 +56,16 @@ const (
 
 // Constants to define the strategy for RpcClientPool
 const (
-	PoolFirst          = "*first"
-	PoolAsync          = "*async"
-	PoolRandom         = "*random"
-	PoolNext           = "*next"
-	PoolFirstPositive  = "*first_positive"
-	PoolParallel       = "*parallel"
-	PoolBroadcast      = "*broadcast"
-	PoolBroadcastSync  = "*broadcast_sync"
-	PoolBroadcastAsync = "*broadcast_async"
+	PoolFirst              = "*first"
+	PoolAsync              = "*async"
+	PoolRandom             = "*random"
+	PoolNext               = "*next"
+	PoolFirstPositive      = "*first_positive"
+	PoolFirstPositiveAsync = "*first_positive_async"
+	PoolParallel           = "*parallel"
+	PoolBroadcast          = "*broadcast"
+	PoolBroadcastSync      = "*broadcast_sync"
+	PoolBroadcastAsync     = "*broadcast_async"
 )
 
 // Errors that library may return back
@@ -570,6 +571,31 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 			}
 		}
 		return
+
+	case PoolFirstPositiveAsync:
+		rplyChan := make(chan interface{}, len(pool.connections))
+		errChan := make(chan error, len(pool.connections))
+		for _, rc := range pool.connections {
+			go func(conn birpc.ClientConnector) {
+				// make a new pointer of the same type
+				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
+				err := conn.Call(ctx, serviceMethod, args, rpl.Interface())
+				if err != nil {
+					errChan <- err
+				} else {
+					rplyChan <- rpl.Interface()
+				}
+			}(rc)
+
+		}
+		select {
+		case rply := <-rplyChan: // first positive wins
+			reflect.ValueOf(reply).Elem().Set(reflect.ValueOf(rply).Elem())
+			return
+		case <-time.After(pool.replyTimeout): // no positive replied, return first error
+			err = <-errChan
+			return
+		}
 	case PoolBroadcastSync:
 		// if all are succesfuly run the error is nil and result is populated
 		// if all are network errors return the last network error
