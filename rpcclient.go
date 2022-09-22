@@ -671,7 +671,8 @@ func IsNetworkError(err error) bool {
 		err.Error() == ErrDisconnected.Error() ||
 		err.Error() == ErrReplyTimeout.Error() ||
 		err.Error() == ErrSessionNotFound.Error() ||
-		strings.HasPrefix(err.Error(), "rpc: can't find service")
+		strings.HasPrefix(err.Error(), "rpc: can't find service") ||
+		strings.HasSuffix(err.Error(), "connect: connection refused")
 }
 
 // NewRPCParallelClientPool returns a new RPCParallelClientPool
