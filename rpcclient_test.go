@@ -4,15 +4,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/rpc"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"net/rpc/jsonrpc"
 
 	"github.com/cgrates/birpc"
 	"github.com/cgrates/birpc/context"
@@ -1111,4 +1118,186 @@ func fibDuration(durationUnit, maxDuration time.Duration) func() time.Duration {
 		}
 		return fibNrAsDuration
 	}
+}
+
+func TestStressRPCClient(t *testing.T) {
+	nrOfGoroutines := 10 // nr. of goroutines to spawn
+	testCases := []struct {
+		codec         string
+		serviceMethod string
+		network       string
+		address       string
+		connTimeout   time.Duration
+		replyTimeout  time.Duration
+	}{
+		{
+			codec:         InternalRPC,
+			serviceMethod: "TestObj.Add",
+			connTimeout:   2 * time.Second,
+			replyTimeout:  2 * time.Second,
+		},
+		{
+			codec:         JSONrpc,
+			serviceMethod: "TestObj.Add",
+			connTimeout:   2 * time.Second,
+			replyTimeout:  2 * time.Second,
+			network:       "tcp",
+			address:       ":2012",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("RPCClient Stress Test For Codec %s", tc.codec), func(t *testing.T) {
+
+			// RPCClient setup
+			var intChan chan context.ClientConnector
+			switch tc.codec {
+			case InternalRPC:
+				intChan = make(chan context.ClientConnector, 1)
+				intChan <- &TestObj{}
+			case JSONrpc:
+				serve(tc.network, tc.address)
+			}
+			rpcClient, err := NewRPCClient(context.Background(), tc.network, tc.address,
+				false, "", "", "", 5, 5, 0, fibDuration, tc.connTimeout, tc.replyTimeout, tc.codec,
+				intChan, false, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var wg sync.WaitGroup
+			wg.Add(nrOfGoroutines)
+			var disconnects, reconnects int64
+			var connChecks, connected, disconnected int64
+			var totalCalls, failedCalls, failedLogic, successfulCalls int64
+
+			for i := 0; i < nrOfGoroutines; i++ {
+				go func() {
+					defer wg.Done()
+					cases := rand.Intn(10)
+					switch cases {
+					// disconnect case
+					case 1:
+						atomic.AddInt64(&disconnects, 1)
+						rpcClient.disconnect()
+					// reconnect case
+					case 2:
+						atomic.AddInt64(&reconnects, 1)
+						ctxTO, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+						rpcClient.reconnect(ctxTO)
+						cancel()
+					// connection check case
+					case 3:
+						atomic.AddInt64(&connChecks, 1)
+						ok := rpcClient.isConnected()
+						if ok {
+							atomic.AddInt64(&connected, 1)
+							return
+						}
+						atomic.AddInt64(&disconnected, 1)
+					// normal call
+					default:
+						var reply int
+						args := &TestArgs{
+							A: rand.Intn(50),
+							B: rand.Intn(50),
+						}
+
+						atomic.AddInt64(&totalCalls, 1)
+						err := rpcClient.Call(context.Background(), tc.serviceMethod, args, &reply)
+						if err != nil {
+							atomic.AddInt64(&failedCalls, 1)
+							return
+						}
+						if reply != args.A+args.B {
+							atomic.AddInt64(&failedLogic, 1)
+							return
+						}
+						atomic.AddInt64(&successfulCalls, 1)
+					}
+
+				}()
+			}
+
+			wg.Wait()
+			// fmt.Println("disconnects:", disconnects)
+			// fmt.Println("reconnects:", reconnects)
+			// fmt.Println("connChecks:", connChecks)
+			// fmt.Println("connected:", connected)
+			// fmt.Println("disconnected:", disconnected)
+			// fmt.Println("totalCalls:", totalCalls)
+			// fmt.Println("failedCalls:", failedCalls)
+			// fmt.Println("failedLogic:", failedLogic)
+			// fmt.Println("successfulCalls:", successfulCalls)
+			// fmt.Println("==========================")
+		})
+	}
+
+}
+
+func serve(network, address string) error {
+	server := rpc.NewServer()
+	err := server.Register(new(TestObj))
+	if err != nil {
+		return err
+	}
+	l, err := net.Listen(network, address)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				log.Fatal(err)
+			}
+			go server.ServeCodec(jsonrpc.NewServerCodec(conn))
+		}
+	}()
+	return nil
+}
+
+type TestArgs struct {
+	A, B int
+}
+
+type TestObj struct{}
+
+func (tObj *TestObj) Add(in *TestArgs, out *int) error {
+	if in == nil {
+		return errors.New("nil args")
+	}
+	*out = in.A + in.B
+	// fmt.Printf("sum between %d and %d is %d\n", in.A, in.B, *out)
+	return nil
+}
+
+func (tObj *TestObj) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	var unsupportedService error = errors.New("unsupported service method")
+	var serverError error = errors.New("serverError")
+	splitMethod := strings.Split(serviceMethod, ".")
+	if len(splitMethod) != 2 {
+		return unsupportedService
+	}
+	// get method
+	method := reflect.ValueOf(tObj).MethodByName(splitMethod[1])
+	if !method.IsValid() {
+		return unsupportedService
+	}
+
+	// construct the params
+	params := []reflect.Value{reflect.ValueOf(args), reflect.ValueOf(reply)}
+
+	ret := method.Call(params)
+	if len(ret) != 1 {
+		return serverError
+	}
+	if ret[0].Interface() == nil {
+		return nil
+	}
+	err, ok := ret[0].Interface().(error)
+	if !ok {
+		return serverError
+	}
+	return err
 }
