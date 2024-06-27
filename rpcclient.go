@@ -374,14 +374,16 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 			}
 		}
 	}
-	if err = client.call(ctx2, serviceMethod, args, reply); !IsNetworkError(err) ||
+	if err = client.call(ctx2, serviceMethod, args, reply); !IsConnectionOrServiceErr(err) ||
 		err == context.DeadlineExceeded ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		client.reconnects == 0 {
 		return
 	}
-	if errReconnect := client.reconnect(ctx); errReconnect != nil {
-		return
+	if isNetworkError(err) {
+		if errReconnect := client.reconnect(ctx); errReconnect != nil {
+			return
+		}
 	}
 	return client.call(ctx2, serviceMethod, args, reply)
 }
@@ -494,7 +496,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 				err := conn.Call(ctx2, serviceMethod, args, rpl.Interface())
-				if !IsNetworkError(err) {
+				if !IsConnectionOrServiceErr(err) {
 					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
 				}
 				wg.Done()
@@ -529,7 +531,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 	case PoolFirst:
 		for _, rc := range pool.connections {
 			err = rc.Call(ctx, serviceMethod, args, reply)
-			if !IsNetworkError(err) {
+			if !IsConnectionOrServiceErr(err) {
 				return
 			}
 		}
@@ -538,7 +540,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 			// because the call is async we need to copy the reply to avoid overwrite
 			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 			for _, rc := range pool.connections {
-				if !IsNetworkError(rc.Call(ctx, serviceMethod, args, rpl.Interface())) {
+				if !IsConnectionOrServiceErr(rc.Call(ctx, serviceMethod, args, rpl.Interface())) {
 					return
 				}
 			}
@@ -549,7 +551,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 		pool.counter++
 		for _, index := range rrIndexes {
 			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
-			if !IsNetworkError(err) {
+			if !IsConnectionOrServiceErr(err) {
 				return
 			}
 		}
@@ -558,7 +560,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 		randomIndex := rand.Perm(len(pool.connections))
 		for _, index := range randomIndex {
 			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
-			if IsNetworkError(err) {
+			if IsConnectionOrServiceErr(err) {
 				continue
 			}
 			return
@@ -624,7 +626,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 		}
 		// if all calls failed check if all are network errors
 		for err = range errChan {
-			if !IsNetworkError(err) {
+			if !IsConnectionOrServiceErr(err) {
 				logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
 				return ErrPartiallyExecuted
 			}
@@ -655,8 +657,8 @@ func roundIndex(start, max int) (result []int) {
 	return
 }
 
-// IsNetworkError will decide if an error is network generated or RPC one
-func IsNetworkError(err error) bool {
+// IsConnectionOrServiceErr will decide if an error is network generated or RPC one
+func IsConnectionOrServiceErr(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -672,6 +674,23 @@ func IsNetworkError(err error) bool {
 		err.Error() == ErrReplyTimeout.Error() ||
 		err.Error() == ErrSessionNotFound.Error() ||
 		strings.HasPrefix(err.Error(), "rpc: can't find service") ||
+		strings.HasSuffix(err.Error(), "connect: connection refused")
+}
+
+// isNetworkError will decide if connection needs to be reset or not
+func isNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if _, isNetError := err.(*net.OpError); isNetError { // connection reset
+		return true
+	}
+	if _, isDNSError := err.(*net.DNSError); isDNSError {
+		return true
+	}
+	return err.Error() == birpc.ErrShutdown.Error() ||
+		err.Error() == ErrReqUnsynchronized.Error() ||
+		err.Error() == ErrDisconnected.Error() ||
 		strings.HasSuffix(err.Error(), "connect: connection refused")
 }
 
