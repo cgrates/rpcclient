@@ -462,23 +462,23 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 
 func TestIsNetworkError(t *testing.T) {
 	var err error
-	if IsConnectionOrServiceErr(err) {
+	if IsConnectionErr(err) || IsServiceErr(err) {
 		t.Errorf("Nill error should not be consider a network error")
 	}
 	err = &net.OpError{Err: syscall.ECONNRESET}
-	if !IsConnectionOrServiceErr(err) {
+	if !IsConnectionErr(err) && !IsServiceErr(err) {
 		t.Errorf("syscall.ECONNRESET should be consider a network error")
 	}
 	err = fmt.Errorf("NOT_FOUND")
-	if IsConnectionOrServiceErr(err) {
+	if IsConnectionErr(err) || IsServiceErr(err) {
 		t.Errorf("%s error should not be consider a network error", err)
 	}
 	err = ErrDisconnected
-	if !IsConnectionOrServiceErr(err) {
+	if !IsConnectionErr(err) && !IsServiceErr(err) {
 		t.Errorf("%s error should be consider a network error", err)
 	}
 	err = new(net.DNSError)
-	if !IsConnectionOrServiceErr(err) {
+	if !IsConnectionErr(err) && !IsServiceErr(err) {
 		t.Errorf("%s error should be consider a network error", err)
 	}
 }
