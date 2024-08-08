@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -401,13 +400,13 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 
-	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
+	_, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		0, fibDuration, time.Millisecond, 50*time.Millisecond, "Not a supported codec", internalChan, 2, false, nil)
 	if err != ErrUnsupportedCodec {
 		t.Errorf("Expected error: %s received: %v", ErrUnsupportedCodec, err)
 	}
 
-	rpcppool, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
+	_, err = NewRPCParallelClientPool(context.Background(), "", "", false, "", "", "", 5, 10,
 		0, fibDuration, time.Millisecond, 50*time.Millisecond, InternalRPC, nil, 2, false, nil)
 	if err != ErrInternallyDisconnected {
 		t.Errorf("Expected error: %s received: %v", ErrInternallyDisconnected, err)
@@ -462,23 +461,23 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 
 func TestIsNetworkError(t *testing.T) {
 	var err error
-	if IsConnectionErr(err) || IsServiceErr(err) {
+	if isNetworkErr(err) || isServiceErr(err) {
 		t.Errorf("Nill error should not be consider a network error")
 	}
 	err = &net.OpError{Err: syscall.ECONNRESET}
-	if !IsConnectionErr(err) && !IsServiceErr(err) {
+	if !isNetworkErr(err) && !isServiceErr(err) {
 		t.Errorf("syscall.ECONNRESET should be consider a network error")
 	}
 	err = fmt.Errorf("NOT_FOUND")
-	if IsConnectionErr(err) || IsServiceErr(err) {
+	if isNetworkErr(err) || isServiceErr(err) {
 		t.Errorf("%s error should not be consider a network error", err)
 	}
 	err = ErrDisconnected
-	if !IsConnectionErr(err) && !IsServiceErr(err) {
+	if !isNetworkErr(err) && !isServiceErr(err) {
 		t.Errorf("%s error should be consider a network error", err)
 	}
 	err = new(net.DNSError)
-	if !IsConnectionErr(err) && !IsServiceErr(err) {
+	if !isNetworkErr(err) && !isServiceErr(err) {
 		t.Errorf("%s error should be consider a network error", err)
 	}
 }
@@ -1125,24 +1124,14 @@ func TestStressRPCClient(t *testing.T) {
 	testCases := []struct {
 		codec         string
 		serviceMethod string
-		network       string
-		address       string
-		connTimeout   time.Duration
-		replyTimeout  time.Duration
 	}{
 		{
 			codec:         InternalRPC,
-			serviceMethod: "TestObj.Add",
-			connTimeout:   2 * time.Second,
-			replyTimeout:  2 * time.Second,
+			serviceMethod: "testObj.Add",
 		},
 		{
 			codec:         JSONrpc,
-			serviceMethod: "TestObj.Add",
-			connTimeout:   2 * time.Second,
-			replyTimeout:  2 * time.Second,
-			network:       "tcp",
-			address:       ":2012",
+			serviceMethod: "testObj.Add",
 		},
 	}
 
@@ -1151,15 +1140,24 @@ func TestStressRPCClient(t *testing.T) {
 
 			// RPCClient setup
 			var intChan chan context.ClientConnector
+			var ln net.Listener
+			var err error
 			switch tc.codec {
 			case InternalRPC:
 				intChan = make(chan context.ClientConnector, 1)
 				intChan <- &TestObj{}
 			case JSONrpc:
-				serve(tc.network, tc.address)
+				ln = serve(t, "tcp", ":0", new(TestObj))
 			}
-			rpcClient, err := NewRPCClient(context.Background(), tc.network, tc.address,
-				false, "", "", "", 5, 5, 0, fibDuration, tc.connTimeout, tc.replyTimeout, tc.codec,
+
+			var network, address string
+			if ln != nil {
+				network = ln.Addr().Network()
+				address = ln.Addr().String()
+			}
+
+			rpcClient, err := NewRPCClient(context.Background(), network, address,
+				false, "", "", "", 5, 5, 0, fibDuration, 2*time.Second, 2*time.Second, tc.codec,
 				intChan, false, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -1235,44 +1233,64 @@ func TestStressRPCClient(t *testing.T) {
 
 }
 
-func serve(network, address string) error {
+func serve(t *testing.T, network, address string, rcvrs ...birpc.ClientConnector) net.Listener {
+	t.Helper()
 	server := rpc.NewServer()
-	err := server.Register(new(TestObj))
-	if err != nil {
-		return err
+	for _, rcvr := range rcvrs {
+		if err := server.Register(rcvr); err != nil {
+			t.Fatal(err)
+		}
 	}
 	l, err := net.Listen(network, address)
 	if err != nil {
-		return err
+		t.Fatal(err)
 	}
+	t.Cleanup(func() { l.Close() })
 	go func() {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
-				log.Fatal(err)
+				return
 			}
 			go server.ServeCodec(jsonrpc.NewServerCodec(conn))
 		}
 	}()
-	return nil
+	return l
 }
 
 type TestArgs struct {
 	A, B int
 }
 
-type TestObj struct{}
+type TestObj struct {
+	returnErr bool
+}
 
-func (tObj *TestObj) Add(in *TestArgs, out *int) error {
+func (t *TestObj) Add(in *TestArgs, out *int) error {
 	if in == nil {
 		return errors.New("nil args")
 	}
 	*out = in.A + in.B
-	// fmt.Printf("sum between %d and %d is %d\n", in.A, in.B, *out)
 	return nil
 }
 
-func (tObj *TestObj) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+func (t *TestObj) ReturnErr(err string, _ *string) error {
+	if !t.returnErr || err == "" {
+		return nil
+	}
+	switch err {
+	case "":
+		return nil
+	case context.DeadlineExceeded.Error():
+		return context.DeadlineExceeded
+	case context.Canceled.Error():
+		return context.Canceled
+	default:
+		return errors.New(err)
+	}
+}
+
+func (t *TestObj) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
 	var unsupportedService error = errors.New("unsupported service method")
 	var serverError error = errors.New("serverError")
 	splitMethod := strings.Split(serviceMethod, ".")
@@ -1280,7 +1298,7 @@ func (tObj *TestObj) Call(ctx *context.Context, serviceMethod string, args inter
 		return unsupportedService
 	}
 	// get method
-	method := reflect.ValueOf(tObj).MethodByName(splitMethod[1])
+	method := reflect.ValueOf(t).MethodByName(splitMethod[1])
 	if !method.IsValid() {
 		return unsupportedService
 	}
@@ -1300,4 +1318,40 @@ func (tObj *TestObj) Call(ctx *context.Context, serviceMethod string, args inter
 		return serverError
 	}
 	return err
+}
+
+// TestRPCClientFailover verifies that failover occurs when connection errors or
+// context.DeadlineExceeded errors happen for *first type RPCClient.
+func TestRPCClientFailover(t *testing.T) {
+	listeners := make([]net.Listener, 0, 3)
+	listeners = append(listeners, serve(t, "tcp", ":0", new(TestObj)))
+	listeners = append(listeners, serve(t, "tcp", ":0", &TestObj{returnErr: true}))
+	listeners = append(listeners, serve(t, "tcp", ":0", new(TestObj)))
+
+	pool := NewRPCPool(PoolFirst, 0)
+	for _, ln := range listeners {
+		rpcClient, err := NewRPCClient(context.Background(), "tcp", ln.Addr().String(),
+			false, "", "", "", 1, 0, 0, fibDuration, 2*time.Second, 2*time.Second, JSONrpc,
+			nil, false, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pool.AddClient(rpcClient)
+	}
+
+	// Simulate a "connection refused" error.
+	listeners[0].Close() // close the first listener to avoid leaks
+
+	// Close the connection manually since the ServeCodec goroutine is still running after closing the listener.
+	if err := pool.connections[0].(*RPCClient).connection.(io.Closer).Close(); err != nil {
+		t.Error(err)
+	}
+
+	// The first RPCClient.Call will fail to connect, triggering a failover to the next RPCClient.
+	// The second RPCClient.Call will timeout, triggering a failover to the third RPCClient, which should succeed.
+	errArg := context.DeadlineExceeded.Error()
+	var reply string
+	if err := pool.Call(context.Background(), "TestObj.ReturnErr", errArg, &reply); err != nil {
+		t.Error(err)
+	}
 }

@@ -72,14 +72,10 @@ const (
 var (
 	ErrReqUnsynchronized       = errors.New("REQ_UNSYNCHRONIZED")
 	ErrUnsupporteServiceMethod = errors.New("UNSUPPORTED_SERVICE_METHOD")
-	ErrWrongArgsType           = errors.New("WRONG_ARGS_TYPE")
-	ErrWrongReplyType          = errors.New("WRONG_REPLY_TYPE")
 	ErrDisconnected            = errors.New("DISCONNECTED")
-	ErrReplyTimeout            = errors.New("REPLY_TIMEOUT")
 	ErrFailedReconnect         = errors.New("FAILED_RECONNECT")
 	ErrInternallyDisconnected  = errors.New("INTERNALLY_DISCONNECTED")
 	ErrUnsupportedCodec        = errors.New("UNSUPPORTED_CODEC")
-	ErrSessionNotFound         = errors.New("SESSION_NOT_FOUND")
 	ErrPartiallyExecuted       = errors.New("PARTIALLY_EXECUTED")
 	ErrUnsupportedBiRPC        = errors.New("UNSUPPORTED_BIRPC")
 )
@@ -374,19 +370,25 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 			}
 		}
 	}
-	if err = client.call(ctx2, serviceMethod, args, reply); !IsConnectionErr(err) &&
-		!IsServiceErr(err) ||
-		err == context.DeadlineExceeded ||
-		err.Error() == ErrSessionNotFound.Error() ||
+	if err = client.call(ctx2, serviceMethod, args, reply); !shouldRetry(err) ||
 		client.reconnects == 0 {
 		return
 	}
-	if IsConnectionErr(err) {
+	if isNetworkErr(err) {
 		if errReconnect := client.reconnect(ctx); errReconnect != nil {
 			return
 		}
 	}
 	return client.call(ctx2, serviceMethod, args, reply)
+}
+
+// shouldRetry determines if a request should be retried based on the error.
+func shouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+	return isNetworkErr(err) || isServiceErr(err) ||
+		err.Error() == context.DeadlineExceeded.Error()
 }
 
 func (client *RPCClient) call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
@@ -497,7 +499,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 				// make a new pointer of the same type
 				rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 				err := conn.Call(ctx2, serviceMethod, args, rpl.Interface())
-				if !IsConnectionErr(err) && !IsServiceErr(err) {
+				if !isNetworkErr(err) && !isServiceErr(err) {
 					replyChan <- &rpcReplyError{reply: rpl.Interface(), err: err}
 				}
 				wg.Done()
@@ -532,7 +534,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 	case PoolFirst:
 		for _, rc := range pool.connections {
 			err = rc.Call(ctx, serviceMethod, args, reply)
-			if !IsConnectionErr(err) && !IsServiceErr(err) {
+			if !ShouldFailover(err) {
 				return
 			}
 		}
@@ -542,7 +544,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 			rpl := reflect.New(reflect.TypeOf(reflect.ValueOf(reply).Elem().Interface()))
 			for _, rc := range pool.connections {
 				err := rc.Call(ctx, serviceMethod, args, rpl.Interface())
-				if !IsConnectionErr(err) && !IsServiceErr(err) {
+				if !ShouldFailover(err) {
 					return
 				}
 			}
@@ -553,19 +555,17 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 		pool.counter++
 		for _, index := range rrIndexes {
 			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
-			if !IsConnectionErr(err) && !IsServiceErr(err) {
+			if !ShouldFailover(err) {
 				return
 			}
 		}
 	case PoolRandom:
-		rand.Seed(time.Now().UnixNano())
 		randomIndex := rand.Perm(len(pool.connections))
 		for _, index := range randomIndex {
 			err = pool.connections[index].Call(ctx, serviceMethod, args, reply)
-			if IsConnectionErr(err) || IsServiceErr(err) {
-				continue
+			if !ShouldFailover(err) {
+				return
 			}
-			return
 		}
 	case PoolFirstPositive:
 		for _, rc := range pool.connections {
@@ -628,7 +628,7 @@ func (pool *RPCPool) Call(ctx *context.Context, serviceMethod string, args inter
 		}
 		// if all calls failed check if all are network errors
 		for err = range errChan {
-			if !IsConnectionErr(err) && !IsServiceErr(err) {
+			if !isNetworkErr(err) && !isServiceErr(err) {
 				logger.Warning(fmt.Sprintf("Error <%s> when calling <%s>", err, serviceMethod))
 				return ErrPartiallyExecuted
 			}
@@ -659,8 +659,8 @@ func roundIndex(start, max int) (result []int) {
 	return
 }
 
-// IsConnectionErr will decide if an error is network generated or not
-func IsConnectionErr(err error) bool {
+// isNetworkErr determines if the error is network-related.
+func isNetworkErr(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -676,15 +676,21 @@ func IsConnectionErr(err error) bool {
 		strings.HasSuffix(err.Error(), "connect: connection refused")
 }
 
-// IsServiceErr will decide if an error is a RPC one or not
-func IsServiceErr(err error) bool {
+// isServiceErr checks if the error is an RPC service-related error.
+func isServiceErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	return strings.HasPrefix(err.Error(), "rpc: can't find service")
+}
 
-	return err.Error() == birpc.ErrShutdown.Error() ||
-		err.Error() == ErrReplyTimeout.Error() ||
-		strings.HasPrefix(err.Error(), "rpc: can't find service")
+// ShouldFailover decides whether to failover to the next connection in the pool.
+func ShouldFailover(err error) bool {
+	if err == nil {
+		return false
+	}
+	return isNetworkErr(err) || isServiceErr(err) ||
+		err.Error() == context.DeadlineExceeded.Error()
 }
 
 // NewRPCParallelClientPool returns a new RPCParallelClientPool
