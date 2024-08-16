@@ -370,7 +370,7 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 			}
 		}
 	}
-	if err = client.call(ctx2, serviceMethod, args, reply); !shouldRetry(err) ||
+	if err = client.call(ctx2, serviceMethod, args, reply); !isNetworkErr(err) && !isServiceErr(err) ||
 		client.reconnects == 0 {
 		return
 	}
@@ -380,15 +380,6 @@ func (client *RPCClient) Call(ctx *context.Context, serviceMethod string, args i
 		}
 	}
 	return client.call(ctx2, serviceMethod, args, reply)
-}
-
-// shouldRetry determines if a request should be retried based on the error.
-func shouldRetry(err error) bool {
-	if err == nil {
-		return false
-	}
-	return isNetworkErr(err) || isServiceErr(err) ||
-		err.Error() == context.DeadlineExceeded.Error()
 }
 
 func (client *RPCClient) call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {

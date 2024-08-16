@@ -459,26 +459,103 @@ func TestNewRpcParallelClientPool(t *testing.T) {
 	}
 }
 
-func TestIsNetworkError(t *testing.T) {
-	var err error
-	if isNetworkErr(err) || isServiceErr(err) {
-		t.Errorf("Nill error should not be consider a network error")
+func TestFailoverAndRetryConditions(t *testing.T) {
+	retry := func(err error) bool {
+		return isNetworkErr(err) || isServiceErr(err)
 	}
-	err = &net.OpError{Err: syscall.ECONNRESET}
-	if !isNetworkErr(err) && !isServiceErr(err) {
-		t.Errorf("syscall.ECONNRESET should be consider a network error")
+	failover := ShouldFailover
+	tests := []struct {
+		name     string
+		err      error
+		passCond func(error) bool
+		want     bool
+	}{
+		{
+			name: "nil should not trigger failover/retry",
+			err:  nil,
+			passCond: func(err error) bool {
+				return !failover(err) && !retry(err)
+			},
+		},
+		{
+			name: "NOT_FOUND should not trigger failover/retry",
+			err:  errors.New("NOT_FOUND"),
+			passCond: func(err error) bool {
+				return !failover(err) && !retry(err)
+			},
+		},
+		{
+			name: "failover & retry on syscall.ECONNRESET (network err)",
+			err:  &net.OpError{Err: syscall.ECONNRESET},
+			passCond: func(err error) bool {
+
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on DISCONNECTED (network err)",
+			err:  ErrDisconnected,
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on DNS errors",
+			err:  new(net.DNSError),
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on 'can't find service' errors",
+			err:  errors.New("rpc: can't find service TestObj.Nothing"),
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on 'connection is shut down' errors",
+			err:  birpc.ErrShutdown,
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on REQ_UNSYNCHRONIZED (sentinel)",
+			err:  ErrReqUnsynchronized,
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "failover & retry on REQ_UNSYNCHRONIZED (string)",
+			err:  errors.New(ErrReqUnsynchronized.Error()),
+			passCond: func(err error) bool {
+				return failover(err) && retry(err)
+			},
+		},
+		{
+			name: "timeout errors should trigger failover but not retry (sentinel)",
+			err:  context.DeadlineExceeded,
+			passCond: func(err error) bool {
+				return failover(err) && !retry(err)
+			},
+		},
+		{
+			name: "timeout errors should trigger failover but not retry (string)",
+			err:  errors.New(context.DeadlineExceeded.Error()),
+			passCond: func(err error) bool {
+				return failover(err) && !retry(err)
+			},
+		},
 	}
-	err = fmt.Errorf("NOT_FOUND")
-	if isNetworkErr(err) || isServiceErr(err) {
-		t.Errorf("%s error should not be consider a network error", err)
-	}
-	err = ErrDisconnected
-	if !isNetworkErr(err) && !isServiceErr(err) {
-		t.Errorf("%s error should be consider a network error", err)
-	}
-	err = new(net.DNSError)
-	if !isNetworkErr(err) && !isServiceErr(err) {
-		t.Errorf("%s error should be consider a network error", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.passCond(tt.err) {
+				t.Errorf("unexpected behavour: retry %v, failover %v on error %v",
+					retry(tt.err), failover(tt.err), tt.err)
+			}
+		})
 	}
 }
 
