@@ -2,6 +2,7 @@ package rpcclient
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"math/rand"
@@ -639,7 +640,6 @@ func TestNewRPCClient(t *testing.T) {
 		connTimeout:  time.Millisecond,
 		replyTimeout: 50 * time.Millisecond,
 		codec:        JSONrpc,
-		internalChan: nil,
 	}
 	client, err := NewRPCClient(context.Background(), "transport", "addr", false, "", "", "", 5, 10,
 		0, fibDuration, time.Millisecond, 50*time.Millisecond, JSONrpc, nil, true, nil)
@@ -1224,7 +1224,7 @@ func TestStressRPCClient(t *testing.T) {
 				intChan = make(chan context.ClientConnector, 1)
 				intChan <- &TestObj{}
 			case JSONrpc:
-				ln = serve(t, "tcp", ":0", new(TestObj))
+				ln = serve(t, "tcp", ":0", JSONrpc, new(TestObj))
 			}
 
 			var network, address string
@@ -1310,26 +1310,31 @@ func TestStressRPCClient(t *testing.T) {
 
 }
 
-func serve(t *testing.T, network, address string, rcvrs ...birpc.ClientConnector) net.Listener {
-	t.Helper()
+func serve(tb testing.TB, network, address string, codec string, rcvrs ...birpc.ClientConnector) net.Listener {
+	tb.Helper()
 	server := rpc.NewServer()
 	for _, rcvr := range rcvrs {
 		if err := server.Register(rcvr); err != nil {
-			t.Fatal(err)
+			tb.Fatal(err)
 		}
 	}
 	l, err := net.Listen(network, address)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	tb.Cleanup(func() { l.Close() })
 	go func() {
 		for {
 			conn, err := l.Accept()
 			if err != nil {
 				return
 			}
-			go server.ServeCodec(jsonrpc.NewServerCodec(conn))
+			switch codec {
+			case JSONrpc:
+				go server.ServeCodec(jsonrpc.NewServerCodec(conn))
+			case GOBrpc:
+				go server.ServeConn(conn)
+			}
 		}
 	}()
 	return l
@@ -1401,9 +1406,9 @@ func (t *TestObj) Call(ctx *context.Context, serviceMethod string, args interfac
 // context.DeadlineExceeded errors happen for *first type RPCClient.
 func TestRPCClientFailover(t *testing.T) {
 	listeners := make([]net.Listener, 0, 3)
-	listeners = append(listeners, serve(t, "tcp", ":0", new(TestObj)))
-	listeners = append(listeners, serve(t, "tcp", ":0", &TestObj{returnErr: true}))
-	listeners = append(listeners, serve(t, "tcp", ":0", new(TestObj)))
+	listeners = append(listeners, serve(t, "tcp", ":0", JSONrpc, new(TestObj)))
+	listeners = append(listeners, serve(t, "tcp", ":0", JSONrpc, &TestObj{returnErr: true}))
+	listeners = append(listeners, serve(t, "tcp", ":0", JSONrpc, new(TestObj)))
 
 	pool := NewRPCPool(PoolFirst, 0)
 	for _, ln := range listeners {
@@ -1431,4 +1436,187 @@ func TestRPCClientFailover(t *testing.T) {
 	if err := pool.Call(context.Background(), "TestObj.ReturnErr", errArg, &reply); err != nil {
 		t.Error(err)
 	}
+}
+
+var prl = flag.Int("prl", 0, "parallelism")
+
+func BenchmarkRPCPool(b *testing.B) {
+	benchmarks := []struct {
+		codec    string
+		strategy string
+	}{
+		{
+			codec:    InternalRPC,
+			strategy: PoolFirst,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolFirstPositive,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolFirstPositiveAsync,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolNext,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolRandom,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolBroadcast,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolBroadcastSync,
+		},
+		{
+			codec:    InternalRPC,
+			strategy: PoolParallel,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolFirst,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolFirstPositive,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolFirstPositiveAsync,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolNext,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolRandom,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolBroadcast,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolBroadcastSync,
+		},
+		{
+			codec:    JSONrpc,
+			strategy: PoolParallel,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolFirst,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolFirstPositive,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolFirstPositiveAsync,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolNext,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolRandom,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolBroadcast,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolBroadcastSync,
+		},
+		{
+			codec:    GOBrpc,
+			strategy: PoolParallel,
+		},
+	}
+
+	add := func(client birpc.ClientConnector, x, y int) {
+		var reply int
+		if err := client.Call(context.Background(), "TestObj.Add",
+			&TestArgs{
+				A: x,
+				B: y,
+			}, &reply); err != nil {
+			b.Error(err)
+		}
+		if reply != 8 {
+			b.Errorf("got: %v, want %v", reply, 8)
+		}
+	}
+
+	computeName := func(codec, strategy string) string {
+		var s strings.Builder
+		s.WriteString(strategy)
+		s.WriteString("_")
+		s.WriteString(codec)
+		s.WriteString("_")
+		s.WriteString(fmt.Sprintf("parallelism=%d", *prl))
+		return s.String()
+	}
+
+	for _, benchmark := range benchmarks {
+		b.Run(computeName(benchmark.codec, benchmark.strategy), func(b *testing.B) {
+			pool := setupPool(b, benchmark.codec, benchmark.strategy, 10)
+			b.SetParallelism(*prl)
+			// b.ResetTimer()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					add(pool, 3, 5)
+				}
+			})
+		})
+	}
+
+}
+
+func setupPool(tb testing.TB, codec, strategy string, noClients int) birpc.ClientConnector {
+	var intChan chan context.ClientConnector
+	var network, address string
+	switch codec {
+	case InternalRPC:
+		intChan = make(chan context.ClientConnector, 1)
+		intChan <- &TestObj{}
+	case JSONrpc, GOBrpc:
+		ln := serve(tb, "tcp", ":0", codec, new(TestObj))
+		network = ln.Addr().Network()
+		address = ln.Addr().String()
+	default:
+		tb.Fatalf("unsupported codec %q", codec)
+	}
+
+	if strategy == PoolParallel {
+		pool, err := NewRPCParallelClientPool(context.Background(), network, address,
+			false, "", "", "", 1, 0, 0, fibDuration, 2*time.Second, 2*time.Second, codec,
+			intChan, 100, true, nil)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		return pool
+	}
+
+	pool := NewRPCPool(strategy, 2*time.Second)
+	for range noClients {
+		client, err := NewRPCClient(context.Background(), network, address,
+			false, "", "", "", 1, 0, 0, fibDuration, 2*time.Second, 2*time.Second, codec,
+			intChan, false, nil)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		pool.AddClient(client)
+	}
+	return pool
+
 }
