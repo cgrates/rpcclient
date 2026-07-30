@@ -1,3 +1,6 @@
+// Copyright ITsysCOM GmbH
+// SPDX-License-Identifier: MIT
+
 package rpcclient
 
 import (
