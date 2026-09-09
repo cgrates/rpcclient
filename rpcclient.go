@@ -35,6 +35,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cgrates/birpc"
@@ -405,18 +406,17 @@ type JSONrpcResponse struct {
 // HTTPjsonRPCClient only for the rpc over http
 type HTTPjsonRPCClient struct {
 	httpClient *http.Client
-	id         uint64
+	id         atomic.Uint64
 	url        string
 }
 
 // Call the method needed to implement ClientConnector
 func (client *HTTPjsonRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
-	client.id++
-	id := client.id
+	id := client.id.Add(1)
 	var data []byte
 	if data, err = json.Marshal(map[string]interface{}{
 		"method": serviceMethod,
-		"id":     client.id,
+		"id":     id,
 		"params": [1]interface{}{args},
 	}); err != nil {
 		return
