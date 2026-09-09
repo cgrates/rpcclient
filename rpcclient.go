@@ -393,47 +393,53 @@ type HTTPjsonRPCClient struct {
 	url        string
 }
 
+type httpJSONRPCRequest struct {
+	Method string         `json:"method"`
+	ID     uint64         `json:"id"`
+	Params [1]interface{} `json:"params"`
+}
+
 // Call the method needed to implement ClientConnector
-func (client *HTTPjsonRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) (err error) {
-	id := client.id.Add(1)
-	var data []byte
-	if data, err = json.Marshal(map[string]interface{}{
-		"method": serviceMethod,
-		"id":     id,
-		"params": [1]interface{}{args},
-	}); err != nil {
-		return
+func (client *HTTPjsonRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+	requestID := client.id.Add(1)
+	request := httpJSONRPCRequest{
+		Method: serviceMethod,
+		ID:     requestID,
+		Params: [1]interface{}{args},
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
 	}
 
-	var req *http.Request
-	req, err = http.NewRequestWithContext(ctx, http.MethodPost, client.url, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, client.url, bytes.NewReader(data))
 	if err != nil {
-		return
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	var resp *http.Response
-	if resp, err = client.httpClient.Do(req); err != nil {
-		return
+	resp, err := client.httpClient.Do(req)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
-	var jsonRsp JSONrpcResponse
-	if err = json.NewDecoder(resp.Body).Decode(&jsonRsp); err != nil {
-		return
+	response := JSONrpcResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return err
 	}
-	if jsonRsp.ID != id {
+	if response.ID != requestID {
 		return ErrReqUnsynchronized
 	}
-	if jsonRsp.Error != nil || jsonRsp.Result == nil {
-		x, ok := jsonRsp.Error.(string)
+	if response.Error != nil || response.Result == nil {
+		x, ok := response.Error.(string)
 		if !ok {
-			return fmt.Errorf("invalid error %v", jsonRsp.Error)
+			return fmt.Errorf("invalid error %v", response.Error)
 		}
 		if x == "" {
 			x = "unspecified error"
 		}
 		return errors.New(x)
 	}
-	return json.Unmarshal(*jsonRsp.Result, reply)
+	return json.Unmarshal(*response.Result, reply)
 }
 
 // RPCPool is a pool of connections
