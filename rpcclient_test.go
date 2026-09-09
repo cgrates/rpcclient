@@ -1168,24 +1168,35 @@ func TestRPCClientHTTPjsonCallUnspecifiedError(t *testing.T) {
 
 func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method  string          `json:"method"`
+			ID      uint64          `json:"id"`
+			Params  []string        `json:"params"`
+			JSONRPC json.RawMessage `json:"jsonrpc"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		if req.Method != "Service.Method" || len(req.Params) != 1 || req.Params[0] != "args" || req.JSONRPC != nil {
+			t.Errorf("unexpected request: %+v", req)
+		}
 		if r.ContentLength <= 0 {
 			t.Errorf("unexpected content length: %d", r.ContentLength)
 		}
-		_, _ = w.Write([]byte("{\"ID\":1,\"Result\":\"5\"}"))
+		_, _ = fmt.Fprintf(w, `{"id":%d,"result":"5"}`, req.ID)
 	}))
 	defer srv.Close()
 	client := &HTTPjsonRPCClient{
 		httpClient: http.DefaultClient,
 		url:        srv.URL,
 	}
-	serviceMethod := ""
-	args := ""
 	var reply string
-
-	err := client.Call(context.TODO(), serviceMethod, args, &reply)
-
-	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	if err := client.Call(context.TODO(), "Service.Method", "args", &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply != "5" {
+		t.Fatalf("expected 5, got %q", reply)
 	}
 }
 
