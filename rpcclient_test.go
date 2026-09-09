@@ -1168,8 +1168,12 @@ func TestRPCClientHTTPjsonCallUnspecifiedError(t *testing.T) {
 
 func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("{\"ID\":1,\"Result\":\"5\"}"))
+		if r.ContentLength <= 0 {
+			t.Errorf("unexpected content length: %d", r.ContentLength)
+		}
+		_, _ = w.Write([]byte("{\"ID\":1,\"Result\":\"5\"}"))
 	}))
+	defer srv.Close()
 	client := &HTTPjsonRPCClient{
 		httpClient: http.DefaultClient,
 		url:        srv.URL,

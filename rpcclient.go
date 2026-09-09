@@ -423,7 +423,7 @@ func (client *HTTPjsonRPCClient) Call(ctx *context.Context, serviceMethod string
 	}
 
 	var req *http.Request
-	req, err = http.NewRequestWithContext(ctx, http.MethodPost, client.url, io.NopCloser(bytes.NewBuffer(data)))
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, client.url, bytes.NewReader(data))
 	if err != nil {
 		return
 	}
