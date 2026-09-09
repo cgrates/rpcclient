@@ -239,13 +239,11 @@ func (client *RPCClient) connect(ctx *context.Context) (err error) {
 			if config, err = loadTLSConfig(client.certPath, client.keyPath, client.caPath); err != nil {
 				return
 			}
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = config
 			client.connection = &HTTPjsonRPCClient{
-				httpClient: &http.Client{
-					Transport: &http.Transport{
-						TLSClientConfig: config,
-					},
-				},
-				url: client.address,
+				httpClient: &http.Client{Transport: transport},
+				url:        client.address,
 			}
 			return
 		}
