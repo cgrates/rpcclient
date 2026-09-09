@@ -4,6 +4,7 @@
 package rpcclient
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -1190,6 +1191,51 @@ func TestRPCClientHTTPjsonCallSuccess(t *testing.T) {
 
 	if err != nil {
 		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+}
+
+func TestRPCClientHTTPjsonCallConcurrent(t *testing.T) {
+	const calls = 64
+	ids := make(chan uint64, calls)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID uint64 `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+			return
+		}
+		ids <- req.ID
+		_, _ = fmt.Fprintf(w, `{"id":%d,"result":"ok"}`, req.ID)
+	}))
+	defer srv.Close()
+	client := &HTTPjsonRPCClient{
+		httpClient: http.DefaultClient,
+		url:        srv.URL,
+	}
+
+	start := make(chan struct{})
+	errCh := make(chan error, calls)
+	for i := 0; i < calls; i++ {
+		go func() {
+			<-start
+			var reply string
+			errCh <- client.Call(context.Background(), "Service.Method", "args", &reply)
+		}()
+	}
+	close(start)
+	for i := 0; i < calls; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := make(map[uint64]struct{}, calls)
+	for i := 0; i < calls; i++ {
+		id := <-ids
+		if _, exists := seen[id]; exists {
+			t.Errorf("duplicate request ID %d", id)
+		}
+		seen[id] = struct{}{}
 	}
 }
 
