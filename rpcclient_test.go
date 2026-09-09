@@ -1002,7 +1002,13 @@ func TestRPCClientconnectTLSTrue(t *testing.T) {
 	err := client.connect(context.Background())
 
 	if err != nil {
-		t.Errorf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+		t.Fatalf("\nexpected: <%+v>, \nreceived: <%+v>", nil, err)
+	}
+	httpClient := client.connection.(*HTTPjsonRPCClient).httpClient
+	transport := httpClient.Transport.(*http.Transport)
+	if transport.Proxy == nil || transport.DialContext == nil ||
+		transport.TLSHandshakeTimeout == 0 || transport.TLSClientConfig == nil {
+		t.Errorf("HTTP transport does not preserve defaults: %+v", transport)
 	}
 }
 func TestRPCClientconnectTLSFalse(t *testing.T) {
