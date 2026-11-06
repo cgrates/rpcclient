@@ -4,6 +4,7 @@
 package rpcclient
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -26,7 +27,7 @@ import (
 	"net/rpc/jsonrpc"
 
 	"github.com/cgrates/birpc"
-	"github.com/cgrates/birpc/context"
+	birpcjsonrpc "github.com/cgrates/birpc/jsonrpc"
 )
 
 type MockRPCClient struct {
@@ -37,15 +38,19 @@ type MockRPCClient struct {
 	cl birpc.ClientConnector
 }
 
-func (m *MockRPCClient) Echo(ctx *context.Context, args string, reply *string) error {
+func (m *MockRPCClient) Echo(ctx context.Context, args string, reply *string) error {
 	*reply += m.id
 	return nil
 }
 
-func (m *MockRPCClient) EchoBiRPC(ctx *context.Context, args string, reply *string) error {
+func (m *MockRPCClient) EchoBiRPC(ctx context.Context, args string, reply *string) error {
 	*reply += m.id
-	m.cl = ctx.Client
+	m.cl = birpc.ClientFromContext(ctx)
 	return nil
+}
+
+func (m *MockRPCClient) EchoCallback(ctx context.Context, args string, reply *string) error {
+	return birpc.ClientFromContext(ctx).Call(ctx, "MockRPCClient.Echo", args, reply)
 }
 
 func (m *MockRPCClient) Handlers() map[string]interface{} {
@@ -54,7 +59,7 @@ func (m *MockRPCClient) Handlers() map[string]interface{} {
 	}
 }
 
-func (m *MockRPCClient) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+func (m *MockRPCClient) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
 	switch m.id {
 	case "offline":
 		return ErrReqUnsynchronized
@@ -63,7 +68,7 @@ func (m *MockRPCClient) Call(ctx *context.Context, serviceMethod string, args in
 	case "nerr":
 		return birpc.ErrShutdown
 	case "callBiRPC":
-		return ctx.Client.Call(ctx, "", args, reply)
+		return birpc.ClientFromContext(ctx).Call(ctx, "", args, reply)
 	case "async":
 		m.used = true
 		select {
@@ -919,8 +924,7 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 	}
 
 	var response string
-	ctx := context.Background()
-	ctx.Client = birpcClient
+	ctx := birpc.WithClient(context.Background(), birpcClient)
 	p.Call(ctx, "", "", &response)
 	if response != "2" {
 		t.Error("Error calling client: ", response)
@@ -964,6 +968,46 @@ func TestRPCClientBiRPCInternalConnect(t *testing.T) {
 		t.Errorf("Expected error %s received:%v ", ErrInternallyDisconnected, err)
 	}
 	close(internalChan)
+}
+
+func TestRPCClientBiRPCCallback(t *testing.T) {
+	for _, codec := range []string{BiRPCJSON, BiRPCGOB} {
+		t.Run(codec, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = listener.Close() })
+			client, err := NewRPCClient(context.Background(), "tcp", listener.Addr().String(),
+				false, "", "", "", 1, 0, 0, fibDuration, time.Second, time.Second, codec,
+				nil, false, &MockRPCClient{id: "client"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = client.disconnect() })
+			conn, err := listener.Accept()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var server *birpc.BirpcClient
+			if codec == BiRPCJSON {
+				server = birpc.NewBirpcClientWithCodec(birpcjsonrpc.NewJSONBirpcCodec(conn))
+			} else {
+				server = birpc.NewBirpcClient(conn)
+			}
+			t.Cleanup(func() { _ = server.Close() })
+			if err := server.Register(new(MockRPCClient)); err != nil {
+				t.Fatal(err)
+			}
+			var reply string
+			if err := client.Call(context.Background(), "MockRPCClient.EchoCallback", "", &reply); err != nil {
+				t.Fatal(err)
+			}
+			if reply != "client" {
+				t.Errorf("Expected: %q received: %q", "client", reply)
+			}
+		})
+	}
 }
 
 func TestRPCClientnewNetConnDialError(t *testing.T) {
@@ -1286,12 +1330,12 @@ func TestStressRPCClient(t *testing.T) {
 		t.Run(fmt.Sprintf("RPCClient Stress Test For Codec %s", tc.codec), func(t *testing.T) {
 
 			// RPCClient setup
-			var intChan chan context.ClientConnector
+			var intChan chan birpc.ClientConnector
 			var ln net.Listener
 			var err error
 			switch tc.codec {
 			case InternalRPC:
-				intChan = make(chan context.ClientConnector, 1)
+				intChan = make(chan birpc.ClientConnector, 1)
 				intChan <- &TestObj{}
 			case JSONrpc:
 				ln = serve(t, "tcp", ":0", JSONrpc, new(TestObj))
@@ -1442,7 +1486,7 @@ func (t *TestObj) ReturnErr(err string, _ *string) error {
 	}
 }
 
-func (t *TestObj) Call(ctx *context.Context, serviceMethod string, args interface{}, reply interface{}) error {
+func (t *TestObj) Call(ctx context.Context, serviceMethod string, args interface{}, reply interface{}) error {
 	var unsupportedService error = errors.New("unsupported service method")
 	var serverError error = errors.New("serverError")
 	splitMethod := strings.Split(serviceMethod, ".")
@@ -1653,11 +1697,11 @@ func BenchmarkRPCPool(b *testing.B) {
 }
 
 func setupPool(tb testing.TB, codec, strategy string, noClients int) birpc.ClientConnector {
-	var intChan chan context.ClientConnector
+	var intChan chan birpc.ClientConnector
 	var network, address string
 	switch codec {
 	case InternalRPC:
-		intChan = make(chan context.ClientConnector, 1)
+		intChan = make(chan birpc.ClientConnector, 1)
 		intChan <- &TestObj{}
 	case JSONrpc, GOBrpc:
 		ln := serve(tb, "tcp", ":0", codec, new(TestObj))
